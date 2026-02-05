@@ -28,12 +28,19 @@ def now_stamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 def bytes_to_image(file_bytes: bytes) -> Image.Image:
-    return Image.open(io.BytesIO(file_bytes)).convert("RGB")
+    # Más robusto: abre desde bytes y normaliza modo
+    img = Image.open(io.BytesIO(file_bytes))
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+    return img
 
 def ocr_image_to_text(file_bytes: bytes) -> str:
-    img = bytes_to_image(file_bytes)
-    # Puedes mejorar OCR con preprocesamiento si lo necesitas
-    return pytesseract.image_to_string(img)
+    # Más robusto en web: try/except + conversión segura
+    try:
+        img = bytes_to_image(file_bytes)
+        return pytesseract.image_to_string(img)
+    except Exception:
+        return ""
 
 def autosize_columns(ws):
     # Ajuste simple de ancho de columnas
@@ -43,21 +50,78 @@ def autosize_columns(ws):
         for cell in col:
             try:
                 max_len = max(max_len, len(str(cell.value)) if cell.value is not None else 0)
-            except:
+            except Exception:
                 pass
         ws.column_dimensions[col_letter].width = min(max(10, max_len + 2), 60)
 
 # ---------------------------
-# Módulo 1: Transformar PDFs/Imágenes -> Excel
+# Helpers NUEVOS para módulo 1
+# ---------------------------
+
+def normalize_number(s: str) -> str:
+    """
+    Normaliza números típicos (LatAm/US) a formato con punto decimal.
+    Ejemplos:
+      "1.234,56" -> "1234.56"
+      "1,234.56" -> "1234.56"
+      "$ 12.000" -> "12000"
+    Devuelve string limpio (útil para Excel/Power BI).
+    """
+    if s is None:
+        return ""
+    t = str(s).strip()
+    # Quita símbolos de moneda/letras/espacios dejando dígitos y separadores
+    t = re.sub(r"[^\d,.\-]", "", t)
+    if not t:
+        return ""
+
+    if "," in t and "." in t:
+        # Asumimos que el último separador es el decimal
+        if t.rfind(",") > t.rfind("."):
+            # decimal comma
+            t = t.replace(".", "").replace(",", ".")
+        else:
+            # decimal dot
+            t = t.replace(",", "")
+    else:
+        # Si solo hay coma, puede ser decimal (si termina en ,dd)
+        if t.count(",") == 1 and re.search(r",\d{1,2}$", t):
+            t = t.replace(".", "").replace(",", ".")
+        else:
+            # en otros casos, quita comas (miles)
+            t = t.replace(",", "")
+            # si hay puntos como miles (1.234.567) -> 1234567
+            if t.count(".") >= 1 and re.search(r"\.\d{3}(\.|$)", t):
+                t = t.replace(".", "")
+
+    return t
+
+def looks_like_date(s: str) -> bool:
+    """Valida fechas frecuentes: dd/mm/yyyy, dd-mm-yyyy, yyyy-mm-dd, yyyy/mm/dd."""
+    if s is None:
+        return False
+    x = str(s).strip()
+    return bool(
+        re.match(r"^\d{2}[/-]\d{2}[/-]\d{4}$", x)
+        or re.match(r"^\d{4}[/-]\d{2}[/-]\d{2}$", x)
+    )
+
+# ---------------------------
+# Módulo 1: Transformar PDFs/Imágenes -> Excel (CORREGIDO)
 # ---------------------------
 
 def transformar_archivos_a_excel(uploaded_files):
     """
     Procesa PDFs e imágenes subidas y genera un Excel en memoria (xlsx).
-    - PDFs: extrae texto por página y aplica regex de documento + parsing básico
-    - Imágenes: OCR con Tesseract
+    - PDFs: extrae texto por página y aplica regex de documento + parsing básico con filtros
+    - Imágenes: OCR con Tesseract (robusto desde bytes)
     """
-    regex_documento = re.compile(r"^(CC|TI|CE|RC|NIT)\s+(\d{5,})\s+(.+)$")
+
+    # Más flexible: permite doc con puntos/guiones
+    regex_documento = re.compile(
+        r"^(CC|TI|CE|RC|NIT)\s+([\d\.\-]{5,})\s+(.+)$",
+        re.IGNORECASE
+    )
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -66,15 +130,25 @@ def transformar_archivos_a_excel(uploaded_files):
     filas_agregadas = 0
     archivos_procesados = 0
 
-    # Encabezado sugerido (puedes ajustarlo)
     ws.append(["TipoDoc", "NumDoc", "Nombre", "Fecha", "Codigo", "Descripcion", "Valor", "Total", "ArchivoOrigen"])
 
     for uf in uploaded_files:
-        nombre_arch = uf.name
+        nombre_arch = getattr(uf, "name", "archivo")
         ext = os.path.splitext(nombre_arch)[1].lower()
-        file_bytes = uf.getvalue()
 
-        tipo_doc = num_doc = nombre = ""
+        # Lectura robusta (Streamlit UploadedFile usualmente soporta getvalue)
+        try:
+            file_bytes = uf.getvalue()
+        except Exception:
+            try:
+                file_bytes = uf.read()
+            except Exception:
+                ws.append(["", "", "", "", "", "ERROR: no se pudo leer el archivo", "", "", nombre_arch])
+                continue
+
+        tipo_doc = ""
+        num_doc = ""
+        nombre = ""
 
         if ext == ".pdf":
             try:
@@ -91,31 +165,53 @@ def transformar_archivos_a_excel(uploaded_files):
 
                 for linea in texto.splitlines():
                     s = linea.strip()
+                    if not s:
+                        continue
+
+                    # Captura documento si aparece
                     m = regex_documento.match(s)
                     if m:
                         tipo_doc, num_doc, nombre = m.groups()
+                        # normaliza num_doc (solo dígitos)
+                        num_doc = re.sub(r"[^\d]", "", num_doc)
                         continue
 
-                    # Parsing “genérico” como en tu script: ajusta según el formato real
+                    # Parsing genérico con filtros para evitar "basura"
                     partes = s.split()
-                    if len(partes) >= 6:
-                        fecha = partes[0]
-                        codigo = partes[1]
-                        descripcion = " ".join(partes[2:-2])
-                        valor = partes[-2].replace(",", "")
-                        total_val = partes[-1].replace(",", "")
-                        ws.append([tipo_doc, num_doc, nombre, fecha, codigo, descripcion, valor, total_val, nombre_arch])
-                        filas_agregadas += 1
+                    if len(partes) < 6:
+                        continue
+
+                    fecha = partes[0]
+                    if not looks_like_date(fecha):
+                        continue
+
+                    codigo = partes[1]
+                    descripcion = " ".join(partes[2:-2]).strip()
+
+                    valor = normalize_number(partes[-2])
+                    total_val = normalize_number(partes[-1])
+
+                    # Evita filas sin contenido útil
+                    if not descripcion:
+                        continue
+                    if valor == "" and total_val == "":
+                        continue
+
+                    ws.append([tipo_doc, num_doc, nombre, fecha, codigo, descripcion, valor, total_val, nombre_arch])
+                    filas_agregadas += 1
 
             doc.close()
 
         elif ext in [".png", ".jpg", ".jpeg", ".tif", ".tiff"]:
             texto = ocr_image_to_text(file_bytes)
-            for linea in texto.splitlines():
-                s = linea.strip()
-                if s:
-                    ws.append(["", "", "", "", "", s, "", "", nombre_arch])
-                    filas_agregadas += 1
+            if not texto.strip():
+                ws.append(["", "", "", "", "", "OCR sin resultados", "", "", nombre_arch])
+            else:
+                for linea in texto.splitlines():
+                    s = linea.strip()
+                    if s:
+                        ws.append(["", "", "", "", "", s, "", "", nombre_arch])
+                        filas_agregadas += 1
         else:
             ws.append(["", "", "", "", "", f"Formato no soportado: {ext}", "", "", nombre_arch])
 
@@ -146,9 +242,8 @@ def firmar_pdfs_en_zip(pdf_files, firma_file, buscar_texto="Firma Prestador"):
     import zipfile
 
     firma_bytes = firma_file.getvalue()
-    firma_name = firma_file.name
-
     zip_buffer = io.BytesIO()
+
     with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for uf in pdf_files:
             nombre_pdf = uf.name
@@ -158,7 +253,6 @@ def firmar_pdfs_en_zip(pdf_files, firma_file, buscar_texto="Firma Prestador"):
                 doc = fitz.open(stream=pdf_bytes, filetype="pdf")
                 page = doc[-1]
 
-                # Buscar texto
                 instances = page.search_for(buscar_texto) if buscar_texto else []
                 if instances:
                     rect_text = instances[0]
@@ -171,7 +265,6 @@ def firmar_pdfs_en_zip(pdf_files, firma_file, buscar_texto="Firma Prestador"):
                 else:
                     rect = fitz.Rect(70, 100, 270, 200)
 
-                # Insertar firma desde bytes (stream)
                 page.insert_image(rect, stream=firma_bytes)
 
                 out_pdf = io.BytesIO()
@@ -182,7 +275,6 @@ def firmar_pdfs_en_zip(pdf_files, firma_file, buscar_texto="Firma Prestador"):
                 zf.writestr(safe_filename(nombre_pdf), out_pdf.read())
 
             except Exception as e:
-                # Si falla, dejamos un .txt con el error dentro del zip
                 zf.writestr(safe_filename(nombre_pdf) + ".error.txt", str(e))
 
     zip_buffer.seek(0)
@@ -215,7 +307,6 @@ def reprogramar_canceladas_excel(file_bytes: bytes, filename: str):
             f1 = pd.to_datetime(fecha_inicial, dayfirst=True, errors="coerce")
             f2 = pd.to_datetime(nueva_cita, dayfirst=True, errors="coerce")
 
-            # Mantiene tu lógica: si la nueva cita es posterior, se omite
             if pd.notna(f2) and pd.notna(f1) and f2 > f1:
                 continue
 
@@ -237,7 +328,6 @@ def reprogramar_canceladas_excel(file_bytes: bytes, filename: str):
 # ---------------------------
 
 def reprogramar_inasistidas_xls(file_bytes: bytes):
-    # Tu archivo original era .xls; usamos xlrd
     df = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="xlrd")
 
     df["Doctor"] = None
@@ -268,12 +358,10 @@ def reprogramar_inasistidas_xls(file_bytes: bytes):
     df_filtrado["Conse"] = df_filtrado.index + 1
     df_filtrado["Anotaciones"] = ""
 
-    # Salida en XLSX (más moderno y fácil en web)
     out = io.BytesIO()
     cols = ["Conse", "Nombre", "Identifica", "Telefono", "Cita_inici", "Nueva_cita", "Doctor", "Anotaciones"]
     df_out = df_filtrado[cols].copy()
 
-    # Formato de fechas similar a tu xls
     df_out["Cita_inici"] = df_out["Cita_inici"].dt.strftime("%d/%m/%Y")
     df_out["Nueva_cita"] = df_out["Nueva_cita"].dt.strftime("%d/%m/%Y")
 
