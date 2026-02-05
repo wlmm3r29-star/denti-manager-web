@@ -86,16 +86,47 @@ def transformar_archivos_a_excel(uploaded_files):
 
 def firmar_pdfs_en_zip(pdfs, firma):
     import zipfile
+
+    firma_bytes = firma.getvalue()
     z = io.BytesIO()
-    with zipfile.ZipFile(z, "w") as zipf:
+
+    with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as zipf:
         for pdf in pdfs:
             doc = fitz.open(stream=pdf.getvalue(), filetype="pdf")
             page = doc[-1]
-            page.insert_image(fitz.Rect(70,100,270,200), stream=firma.getvalue())
+
+            # 🔍 Buscar texto de referencia
+            instancias = page.search_for("Firma Prestador")
+
+            if instancias:
+                rect_texto = instancias[0]
+
+                # Tamaño de la firma
+                firma_width = 140
+                firma_height = 60
+
+                # Posicionar la firma JUSTO ENCIMA de la línea
+                x = rect_texto.x0
+                y = rect_texto.y0 - firma_height - 5
+
+                rect_firma = fitz.Rect(
+                    x,
+                    y,
+                    x + firma_width,
+                    y + firma_height
+                )
+            else:
+                # 🔁 Respaldo (si el texto no existe)
+                rect_firma = fitz.Rect(70, 100, 210, 160)
+
+            page.insert_image(rect_firma, stream=firma_bytes)
+
             buf = io.BytesIO()
             doc.save(buf)
-            zipf.writestr(pdf.name, buf.getvalue())
             doc.close()
+
+            zipf.writestr(pdf.name, buf.getvalue())
+
     z.seek(0)
     return z
 
@@ -188,3 +219,4 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
