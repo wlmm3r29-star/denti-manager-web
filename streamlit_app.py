@@ -106,8 +106,7 @@ def firmar_pdfs_en_zip(pdfs, firma):
 
                 # 👉 Colocar la firma SOBRE la línea
                 x = rect_texto.x0
-                y = rect_texto.y1 - firma_height + 8  
-                # ↑ este +8 es la clave: baja la firma sobre la línea
+                y = rect_texto.y1 - firma_height + 8
 
                 rect_firma = fitz.Rect(
                     x,
@@ -116,7 +115,6 @@ def firmar_pdfs_en_zip(pdfs, firma):
                     y + firma_height
                 )
             else:
-                # Respaldo si no encuentra el texto
                 rect_firma = fitz.Rect(70, 130, 210, 185)
 
             page.insert_image(rect_firma, stream=firma_bytes)
@@ -129,6 +127,7 @@ def firmar_pdfs_en_zip(pdfs, firma):
 
     z.seek(0)
     return z
+
 
 
 # ===========================
@@ -220,6 +219,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
