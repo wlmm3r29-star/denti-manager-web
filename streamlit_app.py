@@ -4,11 +4,9 @@ import re
 import io
 import os
 from datetime import datetime
-
-import fitz  # PyMuPDF
+import fitz
 import openpyxl
 from openpyxl.utils import get_column_letter
-
 import pytesseract
 from PIL import Image
 
@@ -16,261 +14,177 @@ from PIL import Image
 # UTILIDADES GENERALES
 # ===========================
 
-def safe_filename(name: str) -> str:
-    name = name.strip().replace("\\", "_").replace("/", "_")
+def safe_filename(name):
     return re.sub(r"[^a-zA-Z0-9._-]+", "_", name)
 
-def now_stamp() -> str:
+def now_stamp():
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 def autosize_columns(ws):
     for col in ws.columns:
-        max_len = 0
-        col_letter = get_column_letter(col[0].column)
-        for cell in col:
-            if cell.value:
-                max_len = max(max_len, len(str(cell.value)))
-        ws.column_dimensions[col_letter].width = min(max(10, max_len + 2), 60)
+        max_len = max(len(str(c.value)) if c.value else 0 for c in col)
+        ws.column_dimensions[get_column_letter(col[0].column)].width = min(max(10, max_len + 2), 60)
 
-def ocr_image_to_text(file_bytes: bytes) -> str:
+def ocr_image_to_text(file_bytes):
     try:
-        img = Image.open(io.BytesIO(file_bytes))
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
+        img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
         return pytesseract.image_to_string(img)
-    except Exception:
+    except:
         return ""
 
 # ===========================
-# MÓDULO 1 – PDF / IMÁGENES → EXCEL
+# MÓDULO 1 – PDF → EXCEL (TABLAS)
 # ===========================
 
 def transformar_archivos_a_excel(uploaded_files):
     regex_documento = re.compile(r"^(CC|TI|CE|RC|NIT)\s+(\d{5,})\s+(.+)$")
-
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Datos de PDF"
+    ws.title = "Datos PDF"
+    ws.append(["TipoDoc","NumDoc","Nombre","Col1","Col2","Col3","Col4","Col5","Archivo"])
 
-    ws.append([
-        "TipoDoc", "NumDoc", "Nombre",
-        "Col1", "Col2", "Col3", "Col4", "Col5",
-        "ArchivoOrigen"
-    ])
-
-    filas_agregadas = 0
-    archivos_procesados = 0
+    filas = archivos = 0
 
     for uf in uploaded_files:
-        nombre_arch = uf.name
-        ext = os.path.splitext(nombre_arch)[1].lower()
-        file_bytes = uf.getvalue()
+        archivos += 1
+        doc = fitz.open(stream=uf.getvalue(), filetype="pdf")
+        tipo = num = nombre = ""
 
-        tipo_doc = num_doc = nombre = ""
+        for page in doc:
+            for tabla in page.find_tables():
+                for fila in tabla.extract():
+                    if not any(fila):
+                        continue
+                    texto = " ".join(str(c) for c in fila if c)
+                    m = regex_documento.match(texto)
+                    if m:
+                        tipo, num, nombre = m.groups()
+                        continue
 
-        if ext == ".pdf":
-            doc = fitz.open(stream=file_bytes, filetype="pdf")
+                    fila_limpia = []
+                    for c in fila:
+                        if isinstance(c, str):
+                            c = c.replace("$","").replace(",","").strip()
+                            try: c = float(c)
+                            except: pass
+                        fila_limpia.append(c)
 
-            for page in doc:
-                tablas = page.find_tables()
-                if not tablas:
-                    continue
+                    ws.append([tipo,num,nombre] + fila_limpia + [uf.name])
+                    filas += 1
 
-                for tabla in tablas:
-                    matriz = tabla.extract()
-
-                    for fila in matriz:
-                        if not any(str(c).strip() for c in fila if c):
-                            continue
-
-                        fila_texto = " ".join(str(c) for c in fila if c)
-                        m = regex_documento.match(fila_texto.strip())
-                        if m:
-                            tipo_doc, num_doc, nombre = m.groups()
-                            continue
-
-                        fila_limpia = []
-                        for celda in fila:
-                            if isinstance(celda, str):
-                                celda = celda.replace("$", "").replace(",", "").strip()
-                                try:
-                                    celda = float(celda)
-                                except:
-                                    pass
-                            fila_limpia.append(celda)
-
-                        ws.append(
-                            [tipo_doc, num_doc, nombre] +
-                            fila_limpia +
-                            [nombre_arch]
-                        )
-                        filas_agregadas += 1
-
-                    ws.append([])
-
-            doc.close()
-
-        elif ext in [".png", ".jpg", ".jpeg", ".tif", ".tiff"]:
-            texto = ocr_image_to_text(file_bytes)
-            for linea in texto.splitlines():
-                if linea.strip():
-                    ws.append(["", "", "", linea.strip(), "", "", "", "", nombre_arch])
-                    filas_agregadas += 1
-
-        archivos_procesados += 1
+        doc.close()
 
     autosize_columns(ws)
-
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
-
-    return out, {"archivos_procesados": archivos_procesados, "filas_agregadas": filas_agregadas}
+    return out, archivos, filas
 
 # ===========================
 # MÓDULO 2 – FIRMAR PDFs
 # ===========================
 
-def firmar_pdfs_en_zip(pdf_files, firma_file, buscar_texto="Firma Prestador"):
+def firmar_pdfs_en_zip(pdfs, firma):
     import zipfile
-
-    firma_bytes = firma_file.getvalue()
-    zip_buffer = io.BytesIO()
-
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for uf in pdf_files:
-            doc = fitz.open(stream=uf.getvalue(), filetype="pdf")
+    z = io.BytesIO()
+    with zipfile.ZipFile(z, "w") as zipf:
+        for pdf in pdfs:
+            doc = fitz.open(stream=pdf.getvalue(), filetype="pdf")
             page = doc[-1]
-
-            inst = page.search_for(buscar_texto) if buscar_texto else []
-            rect = inst[0] if inst else fitz.Rect(70, 100, 270, 200)
-
-            page.insert_image(rect, stream=firma_bytes)
-
-            out_pdf = io.BytesIO()
-            doc.save(out_pdf)
+            page.insert_image(fitz.Rect(70,100,270,200), stream=firma.getvalue())
+            buf = io.BytesIO()
+            doc.save(buf)
+            zipf.writestr(pdf.name, buf.getvalue())
             doc.close()
-            out_pdf.seek(0)
-
-            zf.writestr(safe_filename(uf.name), out_pdf.read())
-
-    zip_buffer.seek(0)
-    return zip_buffer
+    z.seek(0)
+    return z
 
 # ===========================
-# MÓDULO 3 – CITAS CANCELADAS
+# MÓDULO 3 – CANCELADAS
 # ===========================
 
 def reprogramar_canceladas_excel(file_bytes):
     df = pd.read_excel(io.BytesIO(file_bytes), header=None)
-
-    registros = []
-    doctor_actual = ""
-
-    for _, fila in df.iterrows():
-        if isinstance(fila[1], str) and fila[1].isupper():
-            doctor_actual = fila[1]
-
-        if isinstance(fila[2], str) and re.match(r"\d{2}/\d{2}/\d{2}", fila[2]):
-            fecha = fila[2]
-            nombre = fila[5]
-            telefono = fila[6]
-            nueva = fila[8]
-
-            f1 = pd.to_datetime(fecha, dayfirst=True, errors="coerce")
-            f2 = pd.to_datetime(nueva, dayfirst=True, errors="coerce")
-
+    out_df = []
+    doctor = ""
+    for _, r in df.iterrows():
+        if isinstance(r[1], str) and r[1].isupper():
+            doctor = r[1]
+        if isinstance(r[2], str) and re.match(r"\d{2}/\d{2}/\d{2}", r[2]):
+            f1 = pd.to_datetime(r[2], dayfirst=True, errors="coerce")
+            f2 = pd.to_datetime(r[8], dayfirst=True, errors="coerce")
             if pd.notna(f2) and f2 > f1:
                 continue
+            out_df.append([r[2], r[5], r[6], r[8], doctor])
 
-            registros.append([fecha, nombre, telefono, nueva, doctor_actual])
-
-    df_out = pd.DataFrame(registros, columns=[
-        "Cita_inici", "Nombre", "Telefono", "Nueva_cita", "Doctor"
-    ])
-    df_out.insert(0, "Conse", range(1, len(df_out) + 1))
-
+    df_out = pd.DataFrame(out_df, columns=["Cita","Nombre","Telefono","Nueva","Doctor"])
+    df_out.insert(0,"Conse",range(1,len(df_out)+1))
     out = io.BytesIO()
-    df_out.to_excel(out, index=False)
+    df_out.to_excel(out,index=False)
     out.seek(0)
-
     return out, df_out
 
 # ===========================
-# MÓDULO 4 – CITAS INASISTIDAS
+# MÓDULO 4 – INASISTIDAS
 # ===========================
 
 def reprogramar_inasistidas_xls(file_bytes):
     df = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="xlrd")
-
-    df["Doctor"] = None
     doctor = None
-    for i, fila in df.iterrows():
-        if isinstance(fila[0], str) and fila[0].isupper():
-            doctor = fila[0]
-        df.at[i, "Doctor"] = doctor
+    df["Doctor"] = None
+    for i,r in df.iterrows():
+        if isinstance(r[0], str) and r[0].isupper():
+            doctor = r[0]
+        df.at[i,"Doctor"] = doctor
 
-    df = df.rename(columns={
-        0: "Cita_inici",
-        2: "Identifica",
-        3: "Nombre",
-        4: "Telefono",
-        6: "Nueva_cita"
-    })
-
-    df["Cita_inici"] = pd.to_datetime(df["Cita_inici"], errors="coerce")
-    df["Nueva_cita"] = pd.to_datetime(df["Nueva_cita"], errors="coerce")
-
-    df = df[df["Nueva_cita"] <= df["Cita_inici"]].dropna()
-
-    df.insert(0, "Conse", range(1, len(df) + 1))
-    df["Anotaciones"] = ""
-
+    df = df.rename(columns={0:"Cita",2:"ID",3:"Nombre",4:"Telefono",6:"Nueva"})
+    df["Cita"] = pd.to_datetime(df["Cita"], errors="coerce")
+    df["Nueva"] = pd.to_datetime(df["Nueva"], errors="coerce")
+    df = df[df["Nueva"] <= df["Cita"]].dropna()
+    df.insert(0,"Conse",range(1,len(df)+1))
     out = io.BytesIO()
-    df.to_excel(out, index=False)
+    df.to_excel(out,index=False)
     out.seek(0)
-
     return out, df
 
 # ===========================
 # UI STREAMLIT
 # ===========================
 
-st.set_page_config(page_title="Denti Manager Web", layout="centered")
-st.title("Administrador de dentistas (web)")
-st.caption("Procesa archivos desde el navegador y descarga resultados")
+st.set_page_config("Denti Manager Web", layout="centered")
+st.title("Administrador de Dentistas (Web)")
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "📄 PDF / Imágenes → Excel",
+    "📄 PDF → Excel",
     "✍️ Firmar PDFs",
-    "📅 Citas Canceladas",
-    "🚫 Citas Inasistidas"
+    "📅 Canceladas",
+    "🚫 Inasistidas"
 ])
 
 with tab1:
-    files = st.file_uploader("Archivos", type=["pdf", "png", "jpg", "jpeg", "tif", "tiff"], accept_multiple_files=True)
-    if st.button("Procesar", disabled=not files):
-        out, resumen = transformar_archivos_a_excel(files)
-        st.success(f"Archivos: {resumen['archivos_procesados']} | Filas: {resumen['filas_agregadas']}")
-        st.download_button("Descargar Excel", out, f"PDF_{now_stamp()}.xlsx")
+    files = st.file_uploader("PDFs", type=["pdf"], accept_multiple_files=True)
+    if st.button("Procesar PDFs", key="btn_pdf", disabled=not files):
+        out, a, f = transformar_archivos_a_excel(files)
+        st.success(f"Archivos: {a} | Filas: {f}")
+        st.download_button("Descargar Excel", out, f"PDF_{now_stamp()}.xlsx", key="dl_pdf")
 
 with tab2:
-    firma = st.file_uploader("Firma", type=["png", "jpg", "jpeg"])
-    pdfs = st.file_uploader("PDFs", type=["pdf"], accept_multiple_files=True)
-    if st.button("Firmar", disabled=not (firma and pdfs)):
-        zip_out = firmar_pdfs_en_zip(pdfs, firma)
-        st.download_button("Descargar ZIP", zip_out, f"FIRMADOS_{now_stamp()}.zip")
+    firma = st.file_uploader("Firma", type=["png","jpg"], key="firma")
+    pdfs = st.file_uploader("PDFs", type=["pdf"], accept_multiple_files=True, key="pdfs")
+    if st.button("Firmar PDFs", key="btn_firmar", disabled=not (firma and pdfs)):
+        z = firmar_pdfs_en_zip(pdfs, firma)
+        st.download_button("Descargar ZIP", z, f"FIRMADOS_{now_stamp()}.zip", key="dl_zip")
 
 with tab3:
-    file = st.file_uploader("Excel Canceladas", type=["xls", "xlsx"])
-    if st.button("Generar reporte", disabled=not file):
-        out, df = reprogramar_canceladas_excel(file.getvalue())
+    f = st.file_uploader("Canceladas", type=["xls","xlsx"], key="cancel")
+    if st.button("Generar Canceladas", key="btn_cancel", disabled=not f):
+        out, df = reprogramar_canceladas_excel(f.getvalue())
         st.dataframe(df.head())
-        st.download_button("Descargar", out, f"CANCELADAS_{now_stamp()}.xlsx")
+        st.download_button("Descargar", out, f"CANCELADAS_{now_stamp()}.xlsx", key="dl_cancel")
 
 with tab4:
-    file = st.file_uploader("XLS Inasistidas", type=["xls"])
-    if st.button("Generar reporte", disabled=not file):
-        out, df = reprogramar_inasistidas_xls(file.getvalue())
+    f = st.file_uploader("Inasistidas", type=["xls"], key="inasis")
+    if st.button("Generar Inasistidas", key="btn_inas", disabled=not f):
+        out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
-        st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx")
+        st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
