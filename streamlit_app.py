@@ -95,19 +95,19 @@ def firmar_pdfs_en_zip(pdfs, firma):
             doc = fitz.open(stream=pdf.getvalue(), filetype="pdf")
             page = doc[-1]
 
-            # 🔍 Buscar texto de referencia
             instancias = page.search_for("Firma Prestador")
+
+            # Tamaño de la firma (ajustable)
+            firma_width = 140
+            firma_height = 55
 
             if instancias:
                 rect_texto = instancias[0]
 
-                # Tamaño de la firma
-                firma_width = 120
-                firma_height = 40
-
-                # Posicionar la firma JUSTO ENCIMA de la línea
+                # 👉 Colocar la firma SOBRE la línea
                 x = rect_texto.x0
-                y = rect_texto.y0 - firma_height - 5
+                y = rect_texto.y1 - firma_height + 8  
+                # ↑ este +8 es la clave: baja la firma sobre la línea
 
                 rect_firma = fitz.Rect(
                     x,
@@ -116,8 +116,8 @@ def firmar_pdfs_en_zip(pdfs, firma):
                     y + firma_height
                 )
             else:
-                # 🔁 Respaldo (si el texto no existe)
-                rect_firma = fitz.Rect(70, 100, 210, 160)
+                # Respaldo si no encuentra el texto
+                rect_firma = fitz.Rect(70, 130, 210, 185)
 
             page.insert_image(rect_firma, stream=firma_bytes)
 
@@ -129,6 +129,7 @@ def firmar_pdfs_en_zip(pdfs, firma):
 
     z.seek(0)
     return z
+
 
 # ===========================
 # MÓDULO 3 – CANCELADAS
@@ -219,5 +220,6 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
