@@ -102,8 +102,8 @@ def firmar_pdfs_en_zip(pdfs, firma):
                 rect_texto = instancias[0]
 
                 # Tamaño de la firma
-                firma_width = 140
-                firma_height = 60
+                firma_width = 120
+                firma_height = 40
 
                 # Posicionar la firma JUSTO ENCIMA de la línea
                 x = rect_texto.x0
@@ -219,4 +219,5 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
