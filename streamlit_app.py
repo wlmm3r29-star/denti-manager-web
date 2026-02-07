@@ -149,7 +149,7 @@ def reprogramar_canceladas_excel(file_bytes):
     # -------------------------------------------------
     impresion_origen = ""
     try:
-        if isinstance(df.iloc[0, 1], str) and "Impres" in df.iloc[0, 1]:
+        if isinstance(df.iloc[0, 1], str):
             impresion_origen = df.iloc[0, 1].strip()
     except:
         impresion_origen = ""
@@ -159,20 +159,26 @@ def reprogramar_canceladas_excel(file_bytes):
 
     for _, fila in df.iterrows():
 
+        # Detectar doctor
         if isinstance(fila[1], str):
             texto = fila[1].strip()
             if texto.isupper() and "CITAS" not in texto and len(texto) > 5:
                 doctor_actual = texto
 
+        # Detectar fila de cita
         if isinstance(fila[2], str) and re.match(r"\*?\d{2}/\d{2}/\d{2}", fila[2]):
             fecha_cita = fila[2].replace("*", "").strip()
             nombre = str(fila[5]).strip()
             telefono = str(fila[6]).strip()
-            nueva_cita = str(fila[8]).strip() if pd.notna(fila[8]) else ""
+
+            # Nueva cita (puede venir vacía)
+            nueva_raw = fila[8]
+            nueva_cita = str(nueva_raw).strip() if pd.notna(nueva_raw) else ""
 
             fecha_dt = pd.to_datetime(fecha_cita, dayfirst=True, errors="coerce")
             nueva_dt = pd.to_datetime(nueva_cita, dayfirst=True, errors="coerce")
 
+            # ❌ EXCLUIR SOLO SI NUEVA EXISTE Y ES MAYOR
             if pd.notna(nueva_dt) and nueva_dt > fecha_dt:
                 continue
 
@@ -182,7 +188,10 @@ def reprogramar_canceladas_excel(file_bytes):
                 else ""
             )
 
-            if nombre.lower() != "nan":
+            # ✅ INCLUIR SI:
+            # - Nueva está vacía
+            # - o Nueva <= Cita
+            if nombre.lower() != "nan" and pd.notna(fecha_dt):
                 registros.append([
                     fecha_cita,
                     nombre,
@@ -200,7 +209,7 @@ def reprogramar_canceladas_excel(file_bytes):
     df_out.insert(0, "Conse", range(1, len(df_out) + 1))
 
     # -------------------------------------------------
-    # EXPORTAR EXCEL CON LA MISMA FECHA DE IMPRESIÓN
+    # EXPORTAR EXCEL CON FECHA DE IMPRESIÓN
     # -------------------------------------------------
     temp_output = io.BytesIO()
     df_out.to_excel(temp_output, index=False, startrow=1)
@@ -218,6 +227,7 @@ def reprogramar_canceladas_excel(file_bytes):
     final_output.seek(0)
 
     return final_output, df_out
+
 
 
 # ===========================
@@ -345,6 +355,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
