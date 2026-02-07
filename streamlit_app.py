@@ -228,23 +228,21 @@ def reprogramar_inasistidas_xls(file_bytes):
     import io
     import pandas as pd
 
-    # --- Leer archivo sin encabezado (.xls) ---
     df = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="xlrd")
 
-    # --- Detección del doctor por bloques ---
+    # Detectar doctor por bloques
     df["Doctor"] = None
     doctor_actual = None
-
     for i, row in df.iterrows():
         texto = str(row[0]).strip()
         if texto.isupper() and len(texto.split()) > 1:
             doctor_actual = texto
         df.at[i, "Doctor"] = doctor_actual
 
-    # --- Filtrar registros válidos (igual al código funcional) ---
-    df = df[df[3].notnull() & df[0].notnull() & df[6].notnull()]
+    # Filtrar registros válidos base
+    df = df[df[3].notnull() & df[0].notnull()]  # ✅ ya no obligamos a que col 6 exista
 
-    # --- Renombrar columnas ---
+    # Renombrar columnas
     df = df.rename(columns={
         0: "Cita_inici",
         2: "Identifica",
@@ -253,22 +251,20 @@ def reprogramar_inasistidas_xls(file_bytes):
         6: "Nueva_cit"
     })
 
-    # --- Convertir fechas ---
+    # Convertir fechas
     df["Cita_inici"] = pd.to_datetime(df["Cita_inici"], errors="coerce")
     df["Nueva_cit"] = pd.to_datetime(df["Nueva_cit"], errors="coerce")
 
-    # --- Filtrar citas NO reprogramadas ---
-    df_filtrado = df[df["Nueva_cit"] <= df["Cita_inici"]].copy()
-    df_filtrado = df_filtrado[
-        df_filtrado["Cita_inici"].notnull() &
-        df_filtrado["Nueva_cit"].notnull()
-    ]
+    # ✅ Incluir si Nueva_cit está en blanco o <= Cita_inici
+    df_filtrado = df[df["Nueva_cit"].isna() | (df["Nueva_cit"] <= df["Cita_inici"])].copy()
+
+    # ✅ Solo exigir Cita_inici
+    df_filtrado = df_filtrado[df_filtrado["Cita_inici"].notnull()]
 
     df_filtrado = df_filtrado.reset_index(drop=True)
     df_filtrado.insert(0, "Conse", df_filtrado.index + 1)
     df_filtrado["Anotaciones"] = ""
 
-    # --- Exportar a Excel (Streamlit) ---
     out = io.BytesIO()
     df_filtrado.to_excel(out, index=False)
     out.seek(0)
@@ -319,6 +315,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
