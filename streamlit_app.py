@@ -227,22 +227,40 @@ def reprogramar_canceladas_excel(file_bytes):
 def reprogramar_inasistidas_xls(file_bytes):
     import io
     import pandas as pd
+    import openpyxl
+    from openpyxl import load_workbook
 
-    df = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="xlrd")
+    # -------------------------------------------------
+    # 1. Leer archivo origen (para lógica)
+    # -------------------------------------------------
+    df_raw = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="xlrd")
 
-    # Detectar doctor por bloques
+    # -------------------------------------------------
+    # 2. Tomar la fecha/leyenda desde A1 del origen
+    # -------------------------------------------------
+    encabezado_origen = ""
+    try:
+        if isinstance(df_raw.iloc[0, 0], str):
+            encabezado_origen = df_raw.iloc[0, 0].strip()
+    except:
+        encabezado_origen = ""
+
+    # -------------------------------------------------
+    # 3. LÓGICA QUE YA FUNCIONA (NO TOCADA)
+    # -------------------------------------------------
+    df = df_raw.copy()
+
     df["Doctor"] = None
     doctor_actual = None
+
     for i, row in df.iterrows():
         texto = str(row[0]).strip()
         if texto.isupper() and len(texto.split()) > 1:
             doctor_actual = texto
         df.at[i, "Doctor"] = doctor_actual
 
-    # Filtrar registros válidos base
-    df = df[df[3].notnull() & df[0].notnull()]  # ✅ ya no obligamos a que col 6 exista
+    df = df[df[3].notnull() & df[0].notnull()]
 
-    # Renombrar columnas
     df = df.rename(columns={
         0: "Cita_inici",
         2: "Identifica",
@@ -251,25 +269,37 @@ def reprogramar_inasistidas_xls(file_bytes):
         6: "Nueva_cit"
     })
 
-    # Convertir fechas
     df["Cita_inici"] = pd.to_datetime(df["Cita_inici"], errors="coerce")
     df["Nueva_cit"] = pd.to_datetime(df["Nueva_cit"], errors="coerce")
 
-    # ✅ Incluir si Nueva_cit está en blanco o <= Cita_inici
+    # ✅ incluir si Nueva_cit está en blanco o <= Cita_inici
     df_filtrado = df[df["Nueva_cit"].isna() | (df["Nueva_cit"] <= df["Cita_inici"])].copy()
-
-    # ✅ Solo exigir Cita_inici
     df_filtrado = df_filtrado[df_filtrado["Cita_inici"].notnull()]
 
     df_filtrado = df_filtrado.reset_index(drop=True)
     df_filtrado.insert(0, "Conse", df_filtrado.index + 1)
     df_filtrado["Anotaciones"] = ""
 
-    out = io.BytesIO()
-    df_filtrado.to_excel(out, index=False)
-    out.seek(0)
+    # -------------------------------------------------
+    # 4. Exportar Excel con encabezado en la fila 1
+    # -------------------------------------------------
+    temp_out = io.BytesIO()
+    df_filtrado.to_excel(temp_out, index=False, startrow=1)
+    temp_out.seek(0)
 
-    return out, df_filtrado
+    wb = load_workbook(temp_out)
+    ws = wb.active
+
+    if encabezado_origen:
+        ws["A1"] = encabezado_origen
+        ws["A1"].font = openpyxl.styles.Font(bold=True)
+
+    final_out = io.BytesIO()
+    wb.save(final_out)
+    final_out.seek(0)
+
+    return final_out, df_filtrado
+
 
 
 
@@ -315,6 +345,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
