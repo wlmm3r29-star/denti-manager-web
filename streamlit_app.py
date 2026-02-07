@@ -135,9 +135,6 @@ def firmar_pdfs_en_zip(pdfs, firma):
 # ===========================
 
 def reprogramar_canceladas_excel(file_bytes):
-    import pandas as pd
-    import io
-    import re
 
     df = pd.read_excel(io.BytesIO(file_bytes), header=None)
 
@@ -146,25 +143,25 @@ def reprogramar_canceladas_excel(file_bytes):
 
     for _, fila in df.iterrows():
 
-        # --- Detectar doctor ---
+        # Detectar doctor (columna B)
         if isinstance(fila[1], str):
             texto = fila[1].strip()
             if texto.isupper() and "CITAS" not in texto and len(texto) > 5:
                 doctor_actual = texto
 
-        # --- Detectar fecha de cita ---
-        if isinstance(fila[2], str) and re.match(r'\*?\d{2}/\d{2}/\d{2}', fila[2]):
+        # Detectar fecha de cita (columna C)
+        if isinstance(fila[2], str) and re.match(r"\*?\d{2}/\d{2}/\d{2}", fila[2]):
 
             fecha_cita = fila[2].replace("*", "").strip()
-            nombre_paci = str(fila[5]).strip()
+            nombre = str(fila[5]).strip()
             telefono = str(fila[6]).strip()
             nueva_cita = str(fila[8]).strip() if pd.notna(fila[8]) else ""
 
-            fecha_cita_dt = pd.to_datetime(fecha_cita, dayfirst=True, errors="coerce")
-            nueva_cita_dt = pd.to_datetime(nueva_cita, dayfirst=True, errors="coerce")
+            fecha_dt = pd.to_datetime(fecha_cita, dayfirst=True, errors="coerce")
+            nueva_dt = pd.to_datetime(nueva_cita, dayfirst=True, errors="coerce")
 
-            # --- Filtrar reprogramadas ---
-            if pd.notna(nueva_cita_dt) and nueva_cita_dt > fecha_cita_dt:
+            # Filtrar reprogramadas
+            if pd.notna(nueva_dt) and nueva_dt > fecha_dt:
                 continue
 
             anotaciones = (
@@ -173,10 +170,10 @@ def reprogramar_canceladas_excel(file_bytes):
                 else ""
             )
 
-            if nombre_paci.lower() != "nan":
+            if nombre.lower() != "nan":
                 registros.append([
                     fecha_cita,
-                    nombre_paci,
+                    nombre,
                     telefono,
                     nueva_cita,
                     doctor_actual,
@@ -185,16 +182,60 @@ def reprogramar_canceladas_excel(file_bytes):
 
     df_out = pd.DataFrame(
         registros,
-        columns=["Cita", "Nombre", "Telefono", "Nueva", "Doctor", "Anotaciones"]
+        columns=[
+            "Cita",
+            "Nombre",
+            "Telefono",
+            "Nueva",
+            "Doctor",
+            "Anotaciones"
+        ]
     )
 
     df_out.insert(0, "Conse", range(1, len(df_out) + 1))
 
-    out = io.BytesIO()
-    df_out.to_excel(out, index=False)
-    out.seek(0)
+    output = io.BytesIO()
+    df_out.to_excel(output, index=False)
+    output.seek(0)
 
-    return out, df_out
+    return output, df_out
+
+
+# --------------------------------------------------
+# INTERFAZ STREAMLIT
+# --------------------------------------------------
+st.set_page_config(page_title="Citas Canceladas", layout="wide")
+
+st.title("📋 Procesador de Citas Canceladas")
+
+st.markdown("""
+Sube el archivo Excel de **citas canceladas**  
+El sistema detectará automáticamente las **NO reprogramadas**.
+""")
+
+archivo = st.file_uploader(
+    "📤 Selecciona el archivo Excel",
+    type=["xls", "xlsx"]
+)
+
+if archivo:
+    with st.spinner("Procesando archivo..."):
+        excel_bytes, df_resultado = reprogramar_canceladas_excel(
+            archivo.getvalue()
+        )
+
+    st.success(f"✅ Registros encontrados: {len(df_resultado)}")
+
+    st.dataframe(df_resultado, use_container_width=True)
+
+    nombre_descarga = "CITAS_CANCELADAS_PROCESADAS.xlsx"
+
+    st.download_button(
+        label="⬇️ Descargar Excel",
+        data=excel_bytes,
+        file_name=nombre_descarga,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 
 # ===========================
@@ -261,6 +302,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
