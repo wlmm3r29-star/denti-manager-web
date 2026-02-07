@@ -225,37 +225,6 @@ def reprogramar_canceladas_excel(file_bytes):
 # ===========================
 
 def reprogramar_inasistidas_xls(file_bytes):
-    import io
-    import pandas as pd
-    import openpyxl
-    from openpyxl import load_workbook
-
-    # -----------------------------
-    # 1) LEER A1 DEL ARCHIVO ORIGEN
-    # -----------------------------
-    impresion_origen = ""
-    # Intento 1: si es XLSX
-    try:
-        wb_in = load_workbook(io.BytesIO(file_bytes), data_only=True)
-        ws_in = wb_in.active
-        v = ws_in["A1"].value
-        if v is not None:
-            impresion_origen = str(v).strip()
-    except:
-        # Intento 2: si es XLS (xlrd)
-        try:
-            import xlrd
-            book = xlrd.open_workbook(file_contents=file_bytes)
-            sh = book.sheet_by_index(0)
-            v = sh.cell_value(0, 0)  # A1
-            if v is not None:
-                impresion_origen = str(v).strip()
-        except:
-            impresion_origen = ""
-
-    # -----------------------------------------
-    # 2) TU LÓGICA ORIGINAL (SIN CAMBIOS)
-    # -----------------------------------------
     df = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="xlrd")
 
     doctor = None
@@ -266,7 +235,13 @@ def reprogramar_inasistidas_xls(file_bytes):
             doctor = r[0]
         df.at[i, "Doctor"] = doctor
 
-    df = df.rename(columns={0: "Cita", 2: "ID", 3: "Nombre", 4: "Telefono", 6: "Nueva"})
+    df = df.rename(columns={
+        0: "Cita",
+        2: "ID",
+        3: "Nombre",
+        4: "Telefono",
+        6: "Nueva"
+    })
 
     df["Cita"] = pd.to_datetime(df["Cita"], errors="coerce")
     df["Nueva"] = pd.to_datetime(df["Nueva"], errors="coerce")
@@ -274,25 +249,12 @@ def reprogramar_inasistidas_xls(file_bytes):
     df = df[df["Nueva"] <= df["Cita"]].dropna()
     df.insert(0, "Conse", range(1, len(df) + 1))
 
-    # -----------------------------------------
-    # 3) EXPORTAR CON FILA 1 = A1 DEL ORIGEN
-    # -----------------------------------------
-    temp_out = io.BytesIO()
-    df.to_excel(temp_out, index=False, startrow=1)  # baja la tabla 1 fila
-    temp_out.seek(0)
+    out = io.BytesIO()
+    df.to_excel(out, index=False)
+    out.seek(0)
 
-    wb = load_workbook(temp_out)
-    ws = wb.active
+    return out, df
 
-    if impresion_origen:
-        ws["A1"] = impresion_origen
-        ws["A1"].font = openpyxl.styles.Font(bold=True)
-
-    final_out = io.BytesIO()
-    wb.save(final_out)
-    final_out.seek(0)
-
-    return final_out, df
 
 
 # ===========================
@@ -336,6 +298,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
