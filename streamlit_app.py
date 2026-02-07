@@ -319,7 +319,7 @@ def reprogramar_inasistidas_xls(file_bytes):
 # ===========================
 
 st.set_page_config("Denti Manager Web", layout="centered")
-st.title("Administrador de Dentistas (Web)")
+st.title("Denti Manager Web")
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "📄 PDF → Excel",
@@ -355,6 +355,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
