@@ -140,9 +140,19 @@ def reprogramar_canceladas_excel(file_bytes):
     import pandas as pd
     import openpyxl
     from openpyxl import load_workbook
-    from datetime import datetime
 
+    # Leer archivo origen
     df = pd.read_excel(io.BytesIO(file_bytes), header=None)
+
+    # -------------------------------------------------
+    # TOMAR FECHA DE IMPRESIÓN DESDE B1 (fila 0, col 1)
+    # -------------------------------------------------
+    impresion_origen = ""
+    try:
+        if isinstance(df.iloc[0, 1], str) and "Impres" in df.iloc[0, 1]:
+            impresion_origen = df.iloc[0, 1].strip()
+    except:
+        impresion_origen = ""
 
     registros = []
     doctor_actual = ""
@@ -190,7 +200,7 @@ def reprogramar_canceladas_excel(file_bytes):
     df_out.insert(0, "Conse", range(1, len(df_out) + 1))
 
     # -------------------------------------------------
-    # EXPORTAR A EXCEL CON FILA 1 = FECHA DE IMPRESIÓN
+    # EXPORTAR EXCEL CON LA MISMA FECHA DE IMPRESIÓN
     # -------------------------------------------------
     temp_output = io.BytesIO()
     df_out.to_excel(temp_output, index=False, startrow=1)
@@ -199,15 +209,16 @@ def reprogramar_canceladas_excel(file_bytes):
     wb = load_workbook(temp_output)
     ws = wb.active
 
-    fecha_impresion = datetime.now().strftime("%d/%m/%Y %I:%M %p")
-    ws["A1"] = f"Impresión: {fecha_impresion}"
-    ws["A1"].font = openpyxl.styles.Font(bold=True)
+    if impresion_origen:
+        ws["A1"] = impresion_origen
+        ws["A1"].font = openpyxl.styles.Font(bold=True)
 
     final_output = io.BytesIO()
     wb.save(final_output)
     final_output.seek(0)
 
     return final_output, df_out
+
 
 # ===========================
 # MÓDULO 4 – INASISTIDAS
@@ -273,6 +284,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
