@@ -188,29 +188,6 @@ def reprogramar_canceladas_excel(file_bytes):
 
     return output, df_out
 
-
-st.title("Procesador de Citas Canceladas")
-
-archivo = st.file_uploader(
-    "Selecciona el archivo Excel",
-    type=["xls", "xlsx"]
-)
-
-if archivo:
-    excel_bytes, df_resultado = reprogramar_canceladas_excel(archivo.getvalue())
-
-    st.success(f"Registros encontrados: {len(df_resultado)}")
-    st.dataframe(df_resultado, use_container_width=True)
-
-    st.download_button(
-        "Descargar Excel",
-        data=excel_bytes,
-        file_name="CITAS_CANCELADAS.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-
-
 # ===========================
 # MÓDULO 4 – INASISTIDAS
 # ===========================
@@ -275,6 +252,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
