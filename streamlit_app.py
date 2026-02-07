@@ -1,4 +1,4 @@
-import streamlit as st
+|import streamlit as st
 import pandas as pd
 import re
 import io
@@ -135,25 +135,67 @@ def firmar_pdfs_en_zip(pdfs, firma):
 # ===========================
 
 def reprogramar_canceladas_excel(file_bytes):
-    df = pd.read_excel(io.BytesIO(file_bytes), header=None)
-    out_df = []
-    doctor = ""
-    for _, r in df.iterrows():
-        if isinstance(r[1], str) and r[1].isupper():
-            doctor = r[1]
-        if isinstance(r[2], str) and re.match(r"\d{2}/\d{2}/\d{2}", r[2]):
-            f1 = pd.to_datetime(r[2], dayfirst=True, errors="coerce")
-            f2 = pd.to_datetime(r[8], dayfirst=True, errors="coerce")
-            if pd.notna(f2) and f2 > f1:
-                continue
-            out_df.append([r[2], r[5], r[6], r[8], doctor])
+    import pandas as pd
+    import io
+    import re
 
-    df_out = pd.DataFrame(out_df, columns=["Cita","Nombre","Telefono","Nueva","Doctor"])
-    df_out.insert(0,"Conse",range(1,len(df_out)+1))
+    df = pd.read_excel(io.BytesIO(file_bytes), header=None)
+
+    registros = []
+    doctor_actual = ""
+
+    for _, fila in df.iterrows():
+
+        # --- Detectar doctor ---
+        if isinstance(fila[1], str):
+            texto = fila[1].strip()
+            if texto.isupper() and "CITAS" not in texto and len(texto) > 5:
+                doctor_actual = texto
+
+        # --- Detectar fecha de cita ---
+        if isinstance(fila[2], str) and re.match(r'\*?\d{2}/\d{2}/\d{2}', fila[2]):
+
+            fecha_cita = fila[2].replace("*", "").strip()
+            nombre_paci = str(fila[5]).strip()
+            telefono = str(fila[6]).strip()
+            nueva_cita = str(fila[8]).strip() if pd.notna(fila[8]) else ""
+
+            fecha_cita_dt = pd.to_datetime(fecha_cita, dayfirst=True, errors="coerce")
+            nueva_cita_dt = pd.to_datetime(nueva_cita, dayfirst=True, errors="coerce")
+
+            # --- Filtrar reprogramadas ---
+            if pd.notna(nueva_cita_dt) and nueva_cita_dt > fecha_cita_dt:
+                continue
+
+            anotaciones = (
+                str(fila[12]).strip()
+                if len(fila) > 12 and pd.notna(fila[12])
+                else ""
+            )
+
+            if nombre_paci.lower() != "nan":
+                registros.append([
+                    fecha_cita,
+                    nombre_paci,
+                    telefono,
+                    nueva_cita,
+                    doctor_actual,
+                    anotaciones
+                ])
+
+    df_out = pd.DataFrame(
+        registros,
+        columns=["Cita", "Nombre", "Telefono", "Nueva", "Doctor", "Anotaciones"]
+    )
+
+    df_out.insert(0, "Conse", range(1, len(df_out) + 1))
+
     out = io.BytesIO()
-    df_out.to_excel(out,index=False)
+    df_out.to_excel(out, index=False)
     out.seek(0)
+
     return out, df_out
+
 
 # ===========================
 # MÓDULO 4 – INASISTIDAS
@@ -219,6 +261,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
