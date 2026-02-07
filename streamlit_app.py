@@ -324,8 +324,8 @@ st.title("Administrador de Dentistas (Web)")
 tab1, tab2, tab3, tab4 = st.tabs([
     "📄 PDF → Excel",
     "✍️ Firmar PDFs",
-    "🚷 Canceladas",
-    "🔄 Inasistidas"
+    "🚷 Citas Canceladas",
+    "🔄 Citas Inasistidas"
 ])
 
 with tab1:
@@ -355,6 +355,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
