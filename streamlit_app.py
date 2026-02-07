@@ -137,78 +137,41 @@ def firmar_pdfs_en_zip(pdfs, firma):
 def reprogramar_canceladas_excel(file_bytes):
     df = pd.read_excel(io.BytesIO(file_bytes), header=None)
 
-    registros = []
-    doctor_actual = ""
+    out_df = []
+    doctor = ""
 
-    for _, fila in df.iterrows():
+    for _, r in df.iterrows():
 
-        if isinstance(fila[1], str):
-            texto = fila[1].strip()
-            if texto.isupper() and "CITAS" not in texto and len(texto) > 5:
-                doctor_actual = texto
+        if isinstance(r[1], str) and r[1].isupper():
+            doctor = r[1]
 
-        if isinstance(fila[2], str) and re.match(r"\*?\d{2}/\d{2}/\d{2}", fila[2]):
-            fecha_cita = fila[2].replace("*", "").strip()
-            nombre = str(fila[5]).strip()
-            telefono = str(fila[6]).strip()
-            nueva_cita = str(fila[8]).strip() if pd.notna(fila[8]) else ""
+        if isinstance(r[2], str) and re.match(r"\d{2}/\d{2}/\d{2}", r[2]):
+            f1 = pd.to_datetime(r[2], dayfirst=True, errors="coerce")
+            f2 = pd.to_datetime(r[8], dayfirst=True, errors="coerce")
 
-            fecha_dt = pd.to_datetime(fecha_cita, dayfirst=True, errors="coerce")
-            nueva_dt = pd.to_datetime(nueva_cita, dayfirst=True, errors="coerce")
-
-            if pd.notna(nueva_dt) and nueva_dt > fecha_dt:
+            if pd.notna(f2) and f2 > f1:
                 continue
 
-            anotaciones = (
-                str(fila[12]).strip()
-                if len(fila) > 12 and pd.notna(fila[12])
-                else ""
-            )
-
-            if nombre.lower() != "nan":
-                registros.append([
-                    fecha_cita,
-                    nombre,
-                    telefono,
-                    nueva_cita,
-                    doctor_actual,
-                    anotaciones
-                ])
+            out_df.append([
+                r[2],
+                r[5],
+                r[6],
+                r[8],
+                doctor
+            ])
 
     df_out = pd.DataFrame(
-        registros,
-        columns=["Cita", "Nombre", "Telefono", "Nueva", "Doctor", "Anotaciones"]
+        out_df,
+        columns=["Cita", "Nombre", "Telefono", "Nueva", "Doctor"]
     )
 
     df_out.insert(0, "Conse", range(1, len(df_out) + 1))
 
-    output = io.BytesIO()
-    df_out.to_excel(output, index=False)
-    output.seek(0)
+    out = io.BytesIO()
+    df_out.to_excel(out, index=False)
+    out.seek(0)
 
-    return output, df_out
-
-
-st.set_page_config(page_title="Citas Canceladas", layout="wide")
-st.title("Procesador de Citas Canceladas")
-
-archivo = st.file_uploader(
-    "Selecciona el archivo Excel",
-    type=["xls", "xlsx"]
-)
-
-if archivo:
-    excel_bytes, df_resultado = reprogramar_canceladas_excel(archivo.getvalue())
-
-    st.success(f"Registros encontrados: {len(df_resultado)}")
-    st.dataframe(df_resultado, use_container_width=True)
-
-    st.download_button(
-        "Descargar Excel",
-        data=excel_bytes,
-        file_name="CITAS_CANCELADAS.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    return out, df_out
 
 
 
@@ -276,6 +239,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
