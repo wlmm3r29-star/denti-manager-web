@@ -376,10 +376,20 @@ with tab2:
 
 with tab3:
     f = st.file_uploader("Canceladas", type=["xls","xlsx"], key="cancel")
+
     if st.button("Generar Canceladas", key="btn_cancel", disabled=not f):
         out, df = reprogramar_canceladas_excel(f.getvalue())
+
         st.dataframe(df.head())
-        st.download_button("Descargar", out, f"CANCELADAS_{now_stamp()}.xlsx", key="dl_cancel")
+
+        st.download_button(
+            label="Descargar",
+            data=out,
+            file_name=f"CANCELADAS_{now_stamp()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_cancel"
+        )
+
 
 with tab4:
     f = st.file_uploader("Inasistidas", type=["xls"], key="inasis")
@@ -387,6 +397,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
