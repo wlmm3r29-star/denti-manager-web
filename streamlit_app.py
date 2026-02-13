@@ -136,81 +136,89 @@ def firmar_pdfs_en_zip(pdfs, firma):
 
 def reprogramar_canceladas_excel(file_bytes):
     import io
-    import re
     import pandas as pd
     import openpyxl
     from openpyxl import load_workbook
 
-    # Leer archivo origen
-    df = pd.read_excel(io.BytesIO(file_bytes), header=None)
+    # ------------------------------------------
+    # 1. Leer archivo completo
+    # ------------------------------------------
+    df_raw = pd.read_excel(io.BytesIO(file_bytes), header=None)
 
-    # -------------------------------------------------
-    # TOMAR FECHA DE IMPRESIÓN DESDE B1 (fila 0, col 1)
-    # -------------------------------------------------
+    # ------------------------------------------
+    # 2. Tomar fecha impresión desde B1
+    # ------------------------------------------
     impresion_origen = ""
     try:
-        if isinstance(df.iloc[0, 1], str):
-            impresion_origen = df.iloc[0, 1].strip()
+        if isinstance(df_raw.iloc[0, 1], str):
+            impresion_origen = df_raw.iloc[0, 1].strip()
     except:
-        impresion_origen = ""
+        pass
 
-    registros = []
-    doctor_actual = ""
+    df = df_raw.copy()
 
-    for _, fila in df.iterrows():
+    # ------------------------------------------
+    # 3. Detectar doctor por bloques
+    # ------------------------------------------
+    doctor_actual = None
+    df["Doctor"] = None
 
-        # Detectar doctor
-        if isinstance(fila[1], str):
-            texto = fila[1].strip()
-            if texto.isupper() and "CITAS" not in texto and len(texto) > 5:
-                doctor_actual = texto
+    for i, row in df.iterrows():
+        texto = str(row[1]).strip()
+        if texto.isupper() and "CITAS" not in texto and len(texto) > 5:
+            doctor_actual = texto
+        df.at[i, "Doctor"] = doctor_actual
 
-        # Detectar fila de cita
-        if isinstance(fila[2], str) and re.match(r"\*?\d{2}/\d{2}/\d{2}", fila[2]):
-            fecha_cita = fila[2].replace("*", "").strip()
-            nombre = str(fila[5]).strip()
-            telefono = str(fila[6]).strip()
+    # ------------------------------------------
+    # 4. Renombrar columnas reales
+    #    C = 2
+    #    F = 5
+    #    G = 6
+    #    I = 8
+    # ------------------------------------------
+    df = df.rename(columns={
+        2: "Cita",
+        5: "Nombre",
+        6: "Telefono",
+        8: "Nueva"
+    })
 
-            # Nueva cita (puede venir vacía)
-            nueva_raw = fila[8]
-            nueva_cita = str(nueva_raw).strip() if pd.notna(nueva_raw) else ""
+    # ------------------------------------------
+    # 5. Convertir fechas completas
+    # ------------------------------------------
+    df["Cita_dt"] = pd.to_datetime(df["Cita"], dayfirst=True, errors="coerce")
+    df["Nueva_dt"] = pd.to_datetime(df["Nueva"], dayfirst=True, errors="coerce")
 
-            fecha_dt = pd.to_datetime(fecha_cita, dayfirst=True, errors="coerce")
-            nueva_dt = pd.to_datetime(nueva_cita, dayfirst=True, errors="coerce")
+    # ------------------------------------------
+    # 6. FILTRO CORRECTO (vectorizado)
+    # Nueva en blanco OR Nueva <= Cita
+    # ------------------------------------------
+    df_filtrado = df[
+        df["Cita_dt"].notna() &
+        (
+            df["Nueva_dt"].isna() |
+            (df["Nueva_dt"] <= df["Cita_dt"])
+        )
+    ].copy()
 
-            # ❌ EXCLUIR SOLO SI NUEVA EXISTE Y ES MAYOR
-            if pd.notna(nueva_dt) and nueva_dt > fecha_dt:
-                continue
+    # ------------------------------------------
+    # 7. Construir salida final
+    # ------------------------------------------
+    df_out = df_filtrado[[
+        "Cita",
+        "Nombre",
+        "Telefono",
+        "Nueva",
+        "Doctor"
+    ]].copy()
 
-            anotaciones = (
-                str(fila[12]).strip()
-                if len(fila) > 12 and pd.notna(fila[12])
-                else ""
-            )
+    df_out["Anotaciones"] = ""
+    df_out = df_out.reset_index(drop=True)
+    df_out.insert(0, "Conse", df_out.index + 1)
 
-            # ✅ INCLUIR SI:
-            # - Nueva está vacía
-            # - o Nueva <= Cita
-            if nombre.lower() != "nan" and pd.notna(fecha_dt):
-                registros.append([
-                    fecha_cita,
-                    nombre,
-                    telefono,
-                    nueva_cita,
-                    doctor_actual,
-                    anotaciones
-                ])
-
-    df_out = pd.DataFrame(
-        registros,
-        columns=["Cita", "Nombre", "Telefono", "Nueva", "Doctor", "Anotaciones"]
-    )
-
-    df_out.insert(0, "Conse", range(1, len(df_out) + 1))
-
-    # -------------------------------------------------
-    # EXPORTAR EXCEL CON FECHA DE IMPRESIÓN
-    # -------------------------------------------------
+    # ------------------------------------------
+    # 8. Exportar Excel REAL (.xlsx)
+    # ------------------------------------------
     temp_output = io.BytesIO()
     df_out.to_excel(temp_output, index=False, startrow=1)
     temp_output.seek(0)
@@ -227,6 +235,7 @@ def reprogramar_canceladas_excel(file_bytes):
     final_output.seek(0)
 
     return final_output, df_out
+
 
 
 
@@ -355,6 +364,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
