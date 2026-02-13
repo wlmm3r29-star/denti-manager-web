@@ -244,6 +244,8 @@ def reprogramar_canceladas_excel(file_bytes):
                     telefono,
                     nueva_cita_txt,
                     doctor_actual,
+                    quien_cancela,
+                    motivo,
                     anotaciones
                 ])
 
@@ -392,9 +394,7 @@ with tab3:
 
     if st.button("Generar Canceladas", key="btn_cancel", disabled=not f):
         out, df = reprogramar_canceladas_excel(f.getvalue())
-
         st.dataframe(df.head())
-
         st.download_button(
             label="Descargar",
             data=out,
@@ -410,6 +410,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
