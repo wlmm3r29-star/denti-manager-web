@@ -87,25 +87,19 @@ def transformar_archivos_a_excel(uploaded_files):
 def firmar_pdfs_en_zip(pdfs):
     import zipfile
     import io
-    from PIL import Image
     import fitz
+    from PIL import Image
 
-    # ------------------------------------------
-    # 1. Cargar firma fija desde carpeta assets
-    # ------------------------------------------
-    with open("assetsfirma.png", "rb") as f:
-    firma_bytes = f.read()
+    # Cargar firma fija desde raíz del proyecto
+    with open("firma.png", "rb") as f:
+        firma_bytes = f.read()
 
-
-    # Convertir a RGBA por seguridad
+    # Convertir a PNG RGBA (por seguridad)
     img = Image.open(io.BytesIO(firma_bytes)).convert("RGBA")
-    firma_buffer = io.BytesIO()
-    img.save(firma_buffer, format="PNG")
-    firma_bytes = firma_buffer.getvalue()
+    buffer_img = io.BytesIO()
+    img.save(buffer_img, format="PNG")
+    firma_bytes = buffer_img.getvalue()
 
-    # ------------------------------------------
-    # 2. Firmar PDFs
-    # ------------------------------------------
     z = io.BytesIO()
 
     with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -136,6 +130,7 @@ def firmar_pdfs_en_zip(pdfs):
 
     z.seek(0)
     return z
+
 
 
 
@@ -432,6 +427,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
