@@ -136,96 +136,188 @@ def firmar_pdfs_en_zip(pdfs, firma):
 
 def reprogramar_canceladas_excel(file_bytes):
     import io
+    import re
     import pandas as pd
     import openpyxl
     from openpyxl import load_workbook
 
-    # ------------------------------------------
-    # 1. Leer archivo completo
-    # ------------------------------------------
-    df_raw = pd.read_excel(io.BytesIO(file_bytes), header=None)
+    # 1) Leer archivo (maneja .xls/.xlsx)
+    try:
+        df = pd.read_excel(io.BytesIO(file_bytes), header=None)
+    except Exception:
+        df = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="xlrd")
 
-    # ------------------------------------------
-    # 2. Tomar fecha impresión desde B1
-    # ------------------------------------------
+    # 2) Tomar "Impresión" desde B1 (fila 0, col 1)
     impresion_origen = ""
     try:
-        if isinstance(df_raw.iloc[0, 1], str):
-            impresion_origen = df_raw.iloc[0, 1].strip()
-    except:
-        pass
+        if isinstance(df.iloc[0, 1], str):
+            impresion_origen = df.iloc[0, 1].strip()
+    except Exception:
+        impresion_origen = ""
 
-    df = df_raw.copy()
+    # ---------- helpers ----------
+    def to_dt_mixed(series):
+        """
+        Convierte una columna a datetime soportando:
+        - strings dd/mm/yy, dd/mm/yyyy
+        - datetime ya existentes
+        - números tipo Excel serial (a veces vienen en .xls)
+        """
+        s = series.copy()
 
-    # ------------------------------------------
-    # 3. Detectar doctor por bloques
-    # ------------------------------------------
-    doctor_actual = None
-    df["Doctor"] = None
+        # Primero intento normal
+        dt = pd.to_datetime(s, dayfirst=True, errors="coerce")
 
-    for i, row in df.iterrows():
-        texto = str(row[1]).strip()
-        if texto.isupper() and "CITAS" not in texto and len(texto) > 5:
-            doctor_actual = texto
-        df.at[i, "Doctor"] = doctor_actual
+        # Si hay muchos NaT y hay números, intento convertir serial Excel
+        # (Excel: origen 1899-12-30)
+        if dt.notna().sum() == 0:
+            num = pd.to_numeric(s, errors="coerce")
+            if num.notna().sum() > 0:
+                dt2 = pd.to_datetime(num, unit="d", origin="1899-12-30", errors="coerce")
+                # me quedo con lo que sirva
+                dt = dt2
 
-    # ------------------------------------------
-    # 4. Renombrar columnas reales
-    #    C = 2
-    #    F = 5
-    #    G = 6
-    #    I = 8
-    # ------------------------------------------
-    df = df.rename(columns={
-        2: "Cita",
-        5: "Nombre",
-        6: "Telefono",
-        8: "Nueva"
-    })
+        return dt
 
-    # ------------------------------------------
-    # 5. Convertir fechas completas
-    # ------------------------------------------
-    df["Cita_dt"] = pd.to_datetime(df["Cita"], dayfirst=True, errors="coerce")
-    df["Nueva_dt"] = pd.to_datetime(df["Nueva"], dayfirst=True, errors="coerce")
+    def best_date_col(candidates):
+        best_col = None
+        best_count = -1
+        best_dt = None
+        for c in candidates:
+            if c < 0 or c >= df.shape[1]:
+                continue
+            dt = to_dt_mixed(df.iloc[:, c])
+            cnt = dt.notna().sum()
+            if cnt > best_count:
+                best_count = cnt
+                best_col = c
+                best_dt = dt
+        return best_col, best_dt
 
-    # ------------------------------------------
-    # 6. FILTRO CORRECTO (vectorizado)
-    # Nueva en blanco OR Nueva <= Cita
-    # ------------------------------------------
-    df_filtrado = df[
-        df["Cita_dt"].notna() &
-        (
-            df["Nueva_dt"].isna() |
-            (df["Nueva_dt"] <= df["Cita_dt"])
-        )
-    ].copy()
+    # 3) Detectar columna de Cita y Nueva por “mayor cantidad de fechas válidas”
+    # (en distintos reportes se corren)
+    cita_col, cita_dt = best_date_col([2, 1, 3, 0])      # C, B, D, A
+    nueva_col, nueva_dt = best_date_col([8, 7, 9, 6])    # I, H, J, G
 
-    # ------------------------------------------
-    # 7. Construir salida final
-    # ------------------------------------------
-    df_out = df_filtrado[[
-        "Cita",
-        "Nombre",
-        "Telefono",
-        "Nueva",
-        "Doctor"
-    ]].copy()
+    # Si por alguna razón no detecta Cita, no hay nada que filtrar
+    if cita_col is None or cita_dt is None or cita_dt.notna().sum() == 0:
+        df_out = pd.DataFrame(columns=["Conse", "Cita", "Nombre", "Telefono", "Nueva", "Doctor", "Anotaciones"])
+        # export vacío pero con impresión
+        temp_output = io.BytesIO()
+        df_out.to_excel(temp_output, index=False, startrow=1)
+        temp_output.seek(0)
+        wb = load_workbook(temp_output)
+        ws = wb.active
+        if impresion_origen:
+            ws["A1"] = impresion_origen
+            ws["A1"].font = openpyxl.styles.Font(bold=True)
+        final_output = io.BytesIO()
+        wb.save(final_output)
+        final_output.seek(0)
+        return final_output, df_out
 
-    df_out["Anotaciones"] = ""
-    df_out = df_out.reset_index(drop=True)
-    df_out.insert(0, "Conse", df_out.index + 1)
+    # 4) Detectar doctor por bloques (probamos columna B y A, nos quedamos con la que funcione)
+    def detect_doctor_col(col_idx):
+        doctor_actual = ""
+        doctor_series = []
+        for _, row in df.iterrows():
+            val = row[col_idx] if col_idx < len(row) else None
+            if isinstance(val, str):
+                texto = val.strip()
+                if texto.isupper() and "CITAS" not in texto and len(texto) > 5:
+                    doctor_actual = texto
+            doctor_series.append(doctor_actual)
+        return doctor_series
 
-    # ------------------------------------------
-    # 8. Exportar Excel REAL (.xlsx)
-    # ------------------------------------------
+    # elegimos entre col 1 y 0 (B o A) según cuál produce más doctores no vacíos
+    doc_b = detect_doctor_col(1) if df.shape[1] > 1 else [""] * len(df)
+    doc_a = detect_doctor_col(0)
+    doctor_list = doc_b if sum(1 for x in doc_b if x) >= sum(1 for x in doc_a if x) else doc_a
+
+    # 5) Detectar columnas de Nombre y Teléfono (heurística simple)
+    # Nombre suele estar cerca (E/F). Teléfono cerca (F/G).
+    # Si no, caemos a los índices clásicos.
+    nombre_candidates = [5, 4, 6, 3]
+    tel_candidates = [6, 5, 4, 7]
+
+    def best_text_col(candidates):
+        best = None
+        best_cnt = -1
+        for c in candidates:
+            if c < 0 or c >= df.shape[1]:
+                continue
+            s = df.iloc[:, c].astype(str)
+            # cuenta textos que parezcan nombre (no nan, no header, largo>3)
+            cnt = ((s.str.lower() != "nan") & (s.str.len() > 3) & (~s.str.contains("fecha|hora|ident|paciente|telefono|actividad|nueva", case=False, na=False))).sum()
+            if cnt > best_cnt:
+                best_cnt = cnt
+                best = c
+        return best
+
+    def best_phone_col(candidates):
+        best = None
+        best_cnt = -1
+        for c in candidates:
+            if c < 0 or c >= df.shape[1]:
+                continue
+            s = df.iloc[:, c].astype(str)
+            # cuenta celdas con dígitos (teléfono)
+            cnt = s.str.contains(r"\d{6,}", regex=True, na=False).sum()
+            if cnt > best_cnt:
+                best_cnt = cnt
+                best = c
+        return best
+
+    nombre_col = best_text_col(nombre_candidates)
+    tel_col = best_phone_col(tel_candidates)
+
+    if nombre_col is None:
+        nombre_col = 5 if df.shape[1] > 5 else df.shape[1] - 1
+    if tel_col is None:
+        tel_col = 6 if df.shape[1] > 6 else df.shape[1] - 1
+
+    # 6) Aplicar regla: Nueva en blanco O Nueva <= Cita
+    # Si no pudimos detectar Nueva, la tratamos como vacía (incluye)
+    if nueva_dt is None:
+        nueva_dt = pd.Series([pd.NaT] * len(df))
+
+    mask = cita_dt.notna() & (nueva_dt.isna() | (nueva_dt <= cita_dt))
+
+    # 7) Construir salida
+    cita_txt = df.iloc[:, cita_col].astype(str).str.replace("*", "", regex=False).str.strip()
+    nueva_txt = df.iloc[:, nueva_col].astype(str).str.strip() if nueva_col is not None else ""
+
+    nombre_txt = df.iloc[:, nombre_col].astype(str).str.strip()
+    tel_txt = df.iloc[:, tel_col].astype(str).str.strip()
+
+    anotaciones_txt = ""
+    if df.shape[1] > 12:
+        anotaciones_txt = df.iloc[:, 12].astype(str).str.strip()
+
+    out_rows = []
+    for idx in df.index[mask]:
+        nom = nombre_txt.loc[idx]
+        if str(nom).lower() == "nan":
+            continue
+        out_rows.append([
+            cita_txt.loc[idx],
+            nom,
+            tel_txt.loc[idx],
+            (nueva_txt.loc[idx] if nueva_col is not None else ""),
+            doctor_list[idx],
+            (anotaciones_txt.loc[idx] if isinstance(anotaciones_txt, pd.Series) else "")
+        ])
+
+    df_out = pd.DataFrame(out_rows, columns=["Cita", "Nombre", "Telefono", "Nueva", "Doctor", "Anotaciones"])
+    df_out.insert(0, "Conse", range(1, len(df_out) + 1))
+
+    # 8) Exportar a EXCEL con encabezado "Impresión" en A1
     temp_output = io.BytesIO()
     df_out.to_excel(temp_output, index=False, startrow=1)
     temp_output.seek(0)
 
     wb = load_workbook(temp_output)
     ws = wb.active
-
     if impresion_origen:
         ws["A1"] = impresion_origen
         ws["A1"].font = openpyxl.styles.Font(bold=True)
@@ -364,6 +456,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
