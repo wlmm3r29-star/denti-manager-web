@@ -93,8 +93,9 @@ def firmar_pdfs_en_zip(pdfs):
     # ------------------------------------------
     # 1. Cargar firma fija desde carpeta assets
     # ------------------------------------------
-    with open("assets/firma.png", "rb") as f:
-        firma_bytes = f.read()
+    with open("assetsfirma.png", "rb") as f:
+    firma_bytes = f.read()
+
 
     # Convertir a RGBA por seguridad
     img = Image.open(io.BytesIO(firma_bytes)).convert("RGBA")
@@ -431,6 +432,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
