@@ -84,10 +84,27 @@ def transformar_archivos_a_excel(uploaded_files):
 # MÓDULO 2 – FIRMAR PDFs
 # ===========================
 
-def firmar_pdfs_en_zip(pdfs, firma):
+def firmar_pdfs_en_zip(pdfs):
     import zipfile
+    import io
+    from PIL import Image
+    import fitz
 
-    firma_bytes = firma.getvalue()
+    # ------------------------------------------
+    # 1. Cargar firma fija desde carpeta assets
+    # ------------------------------------------
+    with open("assets/firma.png", "rb") as f:
+        firma_bytes = f.read()
+
+    # Convertir a RGBA por seguridad
+    img = Image.open(io.BytesIO(firma_bytes)).convert("RGBA")
+    firma_buffer = io.BytesIO()
+    img.save(firma_buffer, format="PNG")
+    firma_bytes = firma_buffer.getvalue()
+
+    # ------------------------------------------
+    # 2. Firmar PDFs
+    # ------------------------------------------
     z = io.BytesIO()
 
     with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -97,23 +114,14 @@ def firmar_pdfs_en_zip(pdfs, firma):
 
             instancias = page.search_for("Firma Prestador")
 
-            # Tamaño de la firma (ajustable)
             firma_width = 140
             firma_height = 55
 
             if instancias:
                 rect_texto = instancias[0]
-
-                # 👉 Colocar la firma SOBRE la línea
                 x = rect_texto.x0
                 y = rect_texto.y1 - firma_height + 8
-
-                rect_firma = fitz.Rect(
-                    x,
-                    y,
-                    x + firma_width,
-                    y + firma_height
-                )
+                rect_firma = fitz.Rect(x, y, x + firma_width, y + firma_height)
             else:
                 rect_firma = fitz.Rect(70, 130, 210, 185)
 
@@ -127,6 +135,7 @@ def firmar_pdfs_en_zip(pdfs, firma):
 
     z.seek(0)
     return z
+
 
 
 
@@ -383,11 +392,23 @@ with tab1:
         st.download_button("Descargar Excel", out, f"PDF_{now_stamp()}.xlsx", key="dl_pdf")
 
 with tab2:
-    firma = st.file_uploader("Firma", type=["png","jpg"], key="firma")
-    pdfs = st.file_uploader("PDFs", type=["pdf"], accept_multiple_files=True, key="pdfs")
-    if st.button("Firmar PDFs", key="btn_firmar", disabled=not (firma and pdfs)):
-        z = firmar_pdfs_en_zip(pdfs, firma)
-        st.download_button("Descargar ZIP", z, f"FIRMADOS_{now_stamp()}.zip", key="dl_zip")
+    pdfs = st.file_uploader(
+        "Subir PDFs para firmar",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="pdfs"
+    )
+
+    if st.button("✍️ Firmar PDFs", key="btn_firmar", disabled=not pdfs):
+        z = firmar_pdfs_en_zip(pdfs)
+        st.download_button(
+            "Descargar ZIP Firmado",
+            z,
+            f"FIRMADOS_{now_stamp()}.zip",
+            mime="application/zip",
+            key="dl_zip"
+        )
+
 
 with tab3:
     f = st.file_uploader("Canceladas", type=["xls","xlsx"], key="cancel")
@@ -410,6 +431,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
