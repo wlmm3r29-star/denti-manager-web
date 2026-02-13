@@ -251,7 +251,7 @@ def reprogramar_canceladas_excel(file_bytes):
 
     df_out = pd.DataFrame(
         registros,
-        columns=["Cita", "Nombre", "Telefono", "Nueva", "Doctor", "Anotaciones"]
+        columns=["Cita", "Nombre", "Telefono", "Nueva", "Doctor", "Quien Cancela","Motivo","Observaciones"]
     )
     df_out.insert(0, "Conse", range(1, len(df_out) + 1))
 
@@ -410,6 +410,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
