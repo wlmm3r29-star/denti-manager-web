@@ -218,11 +218,24 @@ def reprogramar_canceladas_excel(file_bytes):
             if pd.notna(f_nueva_dt) and f_nueva_dt > f_cita_dt:
                 continue
 
-            anotaciones = (
-                str(fila[12]).strip()
-                if len(fila) > 12 and pd.notna(fila[12])
-                else ""
-            )
+            quien_cancela = (
+    str(fila[10]).strip()
+    if len(fila) > 10 and pd.notna(fila[10])
+    else ""
+)
+
+motivo = (
+    str(fila[11]).strip()
+    if len(fila) > 11 and pd.notna(fila[11])
+    else ""
+)
+
+anotaciones = (
+    str(fila[12]).strip()
+    if len(fila) > 12 and pd.notna(fila[12])
+    else ""
+)
+
 
             if nombre.lower() != "nan":
                 registros.append([
@@ -397,6 +410,7 @@ with tab4:
         out, df = reprogramar_inasistidas_xls(f.getvalue())
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
+
 
 
 
