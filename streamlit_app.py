@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import re
 import io
-import os
 from datetime import datetime
 import fitz
 import openpyxl
@@ -29,7 +28,7 @@ def ocr_image_to_text(file_bytes):
     try:
         img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
         return pytesseract.image_to_string(img)
-    except:
+    except Exception:
         return ""
 
 # ===========================
@@ -41,7 +40,7 @@ def transformar_archivos_a_excel(uploaded_files):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Datos PDF"
-    ws.append(["TipoDoc","NumDoc","Nombre","Col1","Col2","Col3","Col4","Col5","Archivo"])
+    ws.append(["TipoDoc", "NumDoc", "Nombre", "Col1", "Col2", "Col3", "Col4", "Col5", "Archivo"])
 
     filas = archivos = 0
 
@@ -64,12 +63,14 @@ def transformar_archivos_a_excel(uploaded_files):
                     fila_limpia = []
                     for c in fila:
                         if isinstance(c, str):
-                            c = c.replace("$","").replace(",","").strip()
-                            try: c = float(c)
-                            except: pass
+                            c = c.replace("$", "").replace(",", "").strip()
+                            try:
+                                c = float(c)
+                            except Exception:
+                                pass
                         fila_limpia.append(c)
 
-                    ws.append([tipo,num,nombre] + fila_limpia + [uf.name])
+                    ws.append([tipo, num, nombre] + fila_limpia + [uf.name])
                     filas += 1
 
         doc.close()
@@ -86,9 +87,6 @@ def transformar_archivos_a_excel(uploaded_files):
 
 def firmar_pdfs_en_zip(pdfs):
     import zipfile
-    import io
-    import fitz
-    from PIL import Image
 
     # Cargar firma fija desde raíz del proyecto
     with open("firma.png", "rb") as f:
@@ -132,20 +130,12 @@ def firmar_pdfs_en_zip(pdfs):
     return z
 
 
-
-
-
 # ===========================
 # MÓDULO 3 – CANCELADAS
 # ===========================
 
 def reprogramar_canceladas_excel(file_bytes):
-    import io
-    import re
-    import pandas as pd
-    import openpyxl
     from openpyxl import load_workbook
-    from datetime import datetime
 
     # Leer archivo origen (soporta xls/xlsx)
     try:
@@ -162,38 +152,30 @@ def reprogramar_canceladas_excel(file_bytes):
         impresion_origen = ""
 
     def parse_fecha(x):
-        """Convierte fecha que puede venir como str, datetime, Timestamp o vacío."""
         if pd.isna(x):
             return pd.NaT
 
-        # Si ya es fecha
         if isinstance(x, (pd.Timestamp, datetime)):
             return pd.to_datetime(x, errors="coerce")
 
-        # Si es texto
         s = str(x).strip()
         if s.lower() in ("", "nan", "none"):
             return pd.NaT
         s = s.replace("*", "").strip()
 
-        # Intenta dd/mm/yy o dd/mm/yyyy
         return pd.to_datetime(s, dayfirst=True, errors="coerce")
 
     registros = []
     doctor_actual = ""
 
     for _, fila in df.iterrows():
-
-        # Detectar doctor (col B = índice 1)
         if isinstance(fila[1], str):
             texto = fila[1].strip()
             if texto.isupper() and "CITAS" not in texto and len(texto) > 5:
                 doctor_actual = texto
 
-        # Detectar cita: columna C = índice 2 (puede ser str o fecha real)
         f_cita_dt = parse_fecha(fila[2])
 
-        # Solo procesar filas donde Cita sea válida
         if pd.notna(f_cita_dt):
             fecha_cita_txt = (
                 fila[2].replace("*", "").strip()
@@ -201,25 +183,20 @@ def reprogramar_canceladas_excel(file_bytes):
                 else f_cita_dt.strftime("%d/%m/%y")
             )
 
-            nombre = str(fila[5]).strip()       # col F
-            telefono = str(fila[6]).strip()     # col G
+            nombre = str(fila[5]).strip()
+            telefono = str(fila[6]).strip()
 
-            # Nueva: columna I = índice 8 (puede ser vacía / str / fecha real)
             nueva_raw = fila[8]
             f_nueva_dt = parse_fecha(nueva_raw)
 
             nueva_cita_txt = ""
             if pd.notna(f_nueva_dt):
-                # conserva el texto original si venía como string; si no, lo formatea
                 nueva_cita_txt = (
                     str(nueva_raw).strip()
                     if isinstance(nueva_raw, str)
                     else f_nueva_dt.strftime("%d/%m/%y")
                 )
 
-            # ✅ REGLA CORRECTA:
-            # Incluir si Nueva está en blanco (NaT) o Nueva <= Cita
-            # Excluir solo si Nueva > Cita
             if pd.notna(f_nueva_dt) and f_nueva_dt > f_cita_dt:
                 continue
 
@@ -241,7 +218,6 @@ def reprogramar_canceladas_excel(file_bytes):
                 else ""
             )
 
-
             if nombre.lower() != "nan":
                 registros.append([
                     fecha_cita_txt,
@@ -256,11 +232,10 @@ def reprogramar_canceladas_excel(file_bytes):
 
     df_out = pd.DataFrame(
         registros,
-        columns=["Cita", "Nombre", "Telefono", "Nueva", "Doctor", "Quien Cancela","Motivo","Observaciones"]
+        columns=["Cita", "Nombre", "Telefono", "Nueva", "Doctor", "Quien Cancela", "Motivo", "Observaciones"]
     )
     df_out.insert(0, "Conse", range(1, len(df_out) + 1))
 
-    # Exportar Excel con la misma fecha de impresión en A1
     temp_output = io.BytesIO()
     df_out.to_excel(temp_output, index=False, startrow=1)
     temp_output.seek(0)
@@ -279,37 +254,22 @@ def reprogramar_canceladas_excel(file_bytes):
     return final_output, df_out
 
 
-
-
-
 # ===========================
 # MÓDULO 4 – INASISTIDAS
 # ===========================
 
 def reprogramar_inasistidas_xls(file_bytes):
-    import io
-    import pandas as pd
-    import openpyxl
     from openpyxl import load_workbook
 
-    # -------------------------------------------------
-    # 1. Leer archivo origen (para lógica)
-    # -------------------------------------------------
     df_raw = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="xlrd")
 
-    # -------------------------------------------------
-    # 2. Tomar la fecha/leyenda desde A1 del origen
-    # -------------------------------------------------
     encabezado_origen = ""
     try:
         if isinstance(df_raw.iloc[0, 0], str):
             encabezado_origen = df_raw.iloc[0, 0].strip()
-    except:
+    except Exception:
         encabezado_origen = ""
 
-    # -------------------------------------------------
-    # 3. LÓGICA QUE YA FUNCIONA (NO TOCADA)
-    # -------------------------------------------------
     df = df_raw.copy()
 
     df["Doctor"] = None
@@ -334,7 +294,6 @@ def reprogramar_inasistidas_xls(file_bytes):
     df["Cita_inici"] = pd.to_datetime(df["Cita_inici"], errors="coerce")
     df["Nueva_cit"] = pd.to_datetime(df["Nueva_cit"], errors="coerce")
 
-    # ✅ incluir si Nueva_cit está en blanco o <= Cita_inici
     df_filtrado = df[df["Nueva_cit"].isna() | (df["Nueva_cit"] <= df["Cita_inici"])].copy()
     df_filtrado = df_filtrado[df_filtrado["Cita_inici"].notnull()]
 
@@ -342,9 +301,6 @@ def reprogramar_inasistidas_xls(file_bytes):
     df_filtrado.insert(0, "Conse", df_filtrado.index + 1)
     df_filtrado["Anotaciones"] = ""
 
-    # -------------------------------------------------
-    # 4. Exportar Excel con encabezado en la fila 1
-    # -------------------------------------------------
     temp_out = io.BytesIO()
     df_filtrado.to_excel(temp_out, index=False, startrow=1)
     temp_out.seek(0)
@@ -363,7 +319,324 @@ def reprogramar_inasistidas_xls(file_bytes):
     return final_out, df_filtrado
 
 
+# ===========================
+# MÓDULO 5 – CERTIFICADOS COOMEVA
+# ===========================
 
+def limpiar_linea_coomeva(texto: str) -> str:
+    if texto is None:
+        return ""
+    texto = texto.replace("\xa0", " ")
+    texto = re.sub(r"[ \t]+", " ", texto)
+    return texto.strip()
+
+def extraer_texto_pdf_bytes(file_bytes) -> str:
+    texto = []
+    with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+        for page in doc:
+            texto.append(page.get_text("text"))
+    return "\n".join(texto)
+
+def obtener_lineas_coomeva(texto: str):
+    return [limpiar_linea_coomeva(x) for x in texto.splitlines() if limpiar_linea_coomeva(x)]
+
+def buscar_indice_linea_coomeva(lineas, patron_exacto):
+    for i, linea in enumerate(lineas):
+        if linea == patron_exacto:
+            return i
+    return -1
+
+def es_numero_puro_coomeva(linea: str) -> bool:
+    return bool(re.fullmatch(r"\d{5,}", linea))
+
+def es_fecha_coomeva(linea: str) -> bool:
+    return bool(re.fullmatch(r"\d{2}/\d{2}/\d{4}", linea))
+
+def es_cups_coomeva(linea: str) -> bool:
+    return bool(re.fullmatch(r"\d{4}[A-Z]\d{2}", linea))
+
+def es_valor_monetario_coomeva(linea: str) -> bool:
+    return bool(re.fullmatch(r"[\d\.,]+", linea))
+
+def extraer_carnet_coomeva(texto: str) -> str:
+    m = re.search(r"([A-Z0-9]+)\s+Fecha\s+Generaci[oó]n\s*:", texto, flags=re.IGNORECASE)
+    return m.group(1).strip() if m else ""
+
+def a_numero_coomeva(valor: str):
+    valor = limpiar_linea_coomeva(valor)
+    if not valor:
+        return None
+    valor = valor.replace(",", "").replace("$", "").strip()
+    try:
+        return float(valor)
+    except ValueError:
+        return None
+
+def extraer_datos_usuario_coomeva(texto: str, archivo: str) -> dict:
+    lineas = obtener_lineas_coomeva(texto)
+
+    idx_procedimiento = buscar_indice_linea_coomeva(lineas, "Procedimiento")
+    if idx_procedimiento == -1:
+        idx_procedimiento = next(
+            (i for i, x in enumerate(lineas) if x.startswith("Procedimiento")),
+            len(lineas)
+        )
+
+    head = lineas[:idx_procedimiento]
+    texto_head = "\n".join(head)
+
+    carnet = extraer_carnet_coomeva(texto_head)
+
+    edad = ""
+    plan_tarifario = ""
+    fecha_generacion = ""
+
+    idx_plan_tarifario = buscar_indice_linea_coomeva(head, "Plan Tarifario:")
+    if idx_plan_tarifario != -1:
+        siguientes = head[idx_plan_tarifario + 1: idx_plan_tarifario + 6]
+
+        for val in siguientes:
+            if not edad and re.fullmatch(r"\d{1,3}", val):
+                edad = val
+            elif not plan_tarifario and not es_numero_puro_coomeva(val) and not re.fullmatch(r"\d{1,3}", val) and not es_fecha_coomeva(val):
+                plan_tarifario = val
+            elif not fecha_generacion and es_fecha_coomeva(val):
+                fecha_generacion = val
+
+    plan = ""
+    idx_carnet_label = buscar_indice_linea_coomeva(head, "Carnet:")
+    if idx_carnet_label != -1 and idx_carnet_label + 1 < len(head):
+        plan = head[idx_carnet_label + 1]
+
+    nombre = ""
+    apellidos = ""
+    documento = ""
+    programa = ""
+
+    idx_documento = buscar_indice_linea_coomeva(head, "Documento")
+
+    if idx_documento != -1:
+        # Estructura real detectada:
+        # Documento
+        # APELLIDOS
+        # NIT CLINICA
+        # NOMBRE CLINICA
+        # NOMBRE
+        # DOCUMENTO
+        # PROGRAMA
+        if idx_documento + 1 < len(head):
+            apellidos = head[idx_documento + 1]
+
+        if idx_documento + 4 < len(head):
+            nombre = head[idx_documento + 4]
+
+        if idx_documento + 5 < len(head):
+            documento = head[idx_documento + 5]
+
+        if idx_documento + 6 < len(head):
+            programa = head[idx_documento + 6]
+
+    return {
+        "Archivo": archivo,
+        "Fecha_carga": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Nombre": nombre,
+        "Apellidos": apellidos,
+        "Documento": documento,
+        "Carnet": carnet,
+        "Programa": programa,
+        "Plan": plan,
+        "Plan_Tarifario": plan_tarifario,
+        "Fecha_Generacion": fecha_generacion,
+        "Edad": edad,
+    }
+
+def extraer_tabla_procedimientos_coomeva(texto: str):
+    lineas = obtener_lineas_coomeva(texto)
+
+    idx_inicio = next(
+        (i for i, x in enumerate(lineas) if x == "Pagar por Coomeva"),
+        -1
+    )
+
+    idx_fin = next(
+        (i for i, x in enumerate(lineas)
+         if x == "DATOS USUARIO" or x.startswith("Confirmo que los tratamientos relacionados")),
+        len(lineas)
+    )
+
+    if idx_inicio == -1 or idx_inicio + 1 >= idx_fin:
+        return []
+
+    body = lineas[idx_inicio + 1:idx_fin]
+
+    detalles = []
+    i = 0
+
+    while i < len(body):
+        if not body[i]:
+            i += 1
+            continue
+
+        procedimiento_lines = []
+
+        while i < len(body) and not es_cups_coomeva(body[i]):
+            if es_valor_monetario_coomeva(body[i]):
+                i += 1
+                continue
+            procedimiento_lines.append(body[i])
+            i += 1
+
+        if i >= len(body):
+            break
+
+        if not es_cups_coomeva(body[i]):
+            i += 1
+            continue
+
+        cups = body[i]
+        i += 1
+
+        diagnostico_lines = []
+        while i < len(body) and not es_numero_puro_coomeva(body[i]):
+            if body[i] == "DATOS USUARIO" or body[i].startswith("Confirmo que los tratamientos relacionados"):
+                break
+            diagnostico_lines.append(body[i])
+            i += 1
+
+        if i >= len(body):
+            break
+
+        if not es_numero_puro_coomeva(body[i]):
+            i += 1
+            continue
+
+        no_autorizacion = body[i]
+        i += 1
+
+        tarifa = body[i] if i < len(body) else ""
+        i += 1
+
+        copago = body[i] if i < len(body) else ""
+        i += 1
+
+        valor = body[i] if i < len(body) else ""
+        i += 1
+
+        detalles.append({
+            "Procedimiento": " ".join(procedimiento_lines).strip(),
+            "CUPS": cups.strip(),
+            "Diagnostico": " ".join(diagnostico_lines).strip(),
+            "No_de_Autorizacion": no_autorizacion.strip(),
+            "Tarifa_Antes_de_Copago": a_numero_coomeva(tarifa),
+            "Copago_con_IVA": a_numero_coomeva(copago),
+            "Valor_Autorizado_a_Pagar_por_Coomeva": a_numero_coomeva(valor),
+        })
+
+        while i < len(body) and es_valor_monetario_coomeva(body[i]):
+            i += 1
+
+    return detalles
+
+def transformar_certificados_coomeva(uploaded_files):
+    registros = []
+    errores = []
+    archivos = 0
+
+    for uf in uploaded_files:
+        archivos += 1
+        try:
+            texto = extraer_texto_pdf_bytes(uf.getvalue())
+
+            datos_usuario = extraer_datos_usuario_coomeva(texto, uf.name)
+            detalles = extraer_tabla_procedimientos_coomeva(texto)
+
+            if detalles:
+                for detalle in detalles:
+                    registros.append({**datos_usuario, **detalle})
+            else:
+                registros.append({
+                    **datos_usuario,
+                    "Procedimiento": "",
+                    "CUPS": "",
+                    "Diagnostico": "",
+                    "No_de_Autorizacion": "",
+                    "Tarifa_Antes_de_Copago": None,
+                    "Copago_con_IVA": None,
+                    "Valor_Autorizado_a_Pagar_por_Coomeva": None,
+                })
+
+        except Exception as e:
+            errores.append({
+                "Archivo": uf.name,
+                "Error": str(e)
+            })
+
+    columnas_salida = [
+        "Archivo",
+        "Fecha_carga",
+        "Nombre",
+        "Apellidos",
+        "Documento",
+        "Carnet",
+        "Programa",
+        "Plan",
+        "Plan_Tarifario",
+        "Fecha_Generacion",
+        "Edad",
+        "Procedimiento",
+        "CUPS",
+        "Diagnostico",
+        "No_de_Autorizacion",
+        "Tarifa_Antes_de_Copago",
+        "Copago_con_IVA",
+        "Valor_Autorizado_a_Pagar_por_Coomeva",
+    ]
+
+    df = pd.DataFrame(registros)
+
+    if df.empty:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Datos_Coomeva"
+        ws.append(columnas_salida)
+        if errores:
+            ws_err = wb.create_sheet("Errores")
+            ws_err.append(["Archivo", "Error"])
+            for e in errores:
+                ws_err.append([e["Archivo"], e["Error"]])
+        out = io.BytesIO()
+        wb.save(out)
+        out.seek(0)
+        return out, 0, 0, pd.DataFrame(), pd.DataFrame(errores)
+
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        df[columnas_salida].to_excel(writer, sheet_name="Datos_Coomeva", index=False)
+
+        ws = writer.sheets["Datos_Coomeva"]
+        encabezados = {cell.value: cell.column for cell in ws[1]}
+
+        columnas_moneda = [
+            "Tarifa_Antes_de_Copago",
+            "Copago_con_IVA",
+            "Valor_Autorizado_a_Pagar_por_Coomeva",
+        ]
+
+        for nombre_col in columnas_moneda:
+            col_idx = encabezados.get(nombre_col)
+            if col_idx:
+                for fila in range(2, ws.max_row + 1):
+                    ws.cell(row=fila, column=col_idx).number_format = '$#,##0'
+
+        autosize_columns(ws)
+
+        if errores:
+            df_err = pd.DataFrame(errores)
+            df_err.to_excel(writer, sheet_name="Errores", index=False)
+            autosize_columns(writer.sheets["Errores"])
+
+    out.seek(0)
+    return out, archivos, len(df), df, pd.DataFrame(errores)
 
 
 # ===========================
@@ -373,11 +646,12 @@ def reprogramar_inasistidas_xls(file_bytes):
 st.set_page_config("Denti Manager Web", layout="centered")
 st.title("Denti Manager")
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📄 PDF → Excel",
     "✍️ Firmar PDFs",
     "🚷 Citas Canceladas",
-    "🔄 Citas Inasistidas"
+    "🔄 Citas Inasistidas",
+    "🦷 Certificados Coomeva"
 ])
 
 with tab1:
@@ -405,9 +679,8 @@ with tab2:
             key="dl_zip"
         )
 
-
 with tab3:
-    f = st.file_uploader("Canceladas", type=["xls","xlsx"], key="cancel")
+    f = st.file_uploader("Canceladas", type=["xls", "xlsx"], key="cancel")
 
     if st.button("Generar Canceladas", key="btn_cancel", disabled=not f):
         out, df = reprogramar_canceladas_excel(f.getvalue())
@@ -420,7 +693,6 @@ with tab3:
             key="dl_cancel"
         )
 
-
 with tab4:
     f = st.file_uploader("Inasistidas", type=["xls"], key="inasis")
     if st.button("Generar Inasistidas", key="btn_inas", disabled=not f):
@@ -428,38 +700,29 @@ with tab4:
         st.dataframe(df.head())
         st.download_button("Descargar", out, f"INASISTIDAS_{now_stamp()}.xlsx", key="dl_inas")
 
+with tab5:
+    files = st.file_uploader(
+        "Sube los certificados Coomeva en PDF",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="coomeva_pdfs"
+    )
 
+    if st.button("Procesar Certificados Coomeva", key="btn_coomeva", disabled=not files):
+        out, archivos, filas, df_preview, df_err = transformar_certificados_coomeva(files)
+        st.success(f"Archivos procesados: {archivos} | Filas generadas: {filas}")
 
+        if not df_preview.empty:
+            st.dataframe(df_preview.head())
 
+        if not df_err.empty:
+            st.warning("Algunos archivos presentaron errores.")
+            st.dataframe(df_err)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        st.download_button(
+            "Descargar Excel Coomeva",
+            out,
+            f"COOMEVA_{now_stamp()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_coomeva"
+        )
