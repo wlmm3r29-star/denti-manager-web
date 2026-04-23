@@ -10,19 +10,48 @@ import pytesseract
 from PIL import Image
 
 # ===========================
+# ESTADO STREAMLIT
+# ===========================
+if "coomeva_uploader_key" not in st.session_state:
+    st.session_state.coomeva_uploader_key = 0
+
+if "coomeva_resultado" not in st.session_state:
+    st.session_state.coomeva_resultado = None
+
+if "coomeva_preview" not in st.session_state:
+    st.session_state.coomeva_preview = None
+
+if "coomeva_errores" not in st.session_state:
+    st.session_state.coomeva_errores = None
+
+if "coomeva_resumen" not in st.session_state:
+    st.session_state.coomeva_resumen = None
+
+
+def limpiar_coomeva():
+    st.session_state.coomeva_uploader_key += 1
+    st.session_state.coomeva_resultado = None
+    st.session_state.coomeva_preview = None
+    st.session_state.coomeva_errores = None
+    st.session_state.coomeva_resumen = None
+
+
+# ===========================
 # UTILIDADES GENERALES
 # ===========================
-
 def safe_filename(name):
     return re.sub(r"[^a-zA-Z0-9._-]+", "_", name)
 
+
 def now_stamp():
     return datetime.now().strftime("%Y%m%d_%H%M%S")
+
 
 def autosize_columns(ws):
     for col in ws.columns:
         max_len = max(len(str(c.value)) if c.value else 0 for c in col)
         ws.column_dimensions[get_column_letter(col[0].column)].width = min(max(10, max_len + 2), 60)
+
 
 def ocr_image_to_text(file_bytes):
     try:
@@ -31,10 +60,10 @@ def ocr_image_to_text(file_bytes):
     except Exception:
         return ""
 
+
 # ===========================
 # MÓDULO 1 – PDF → EXCEL (TABLAS)
 # ===========================
-
 def transformar_archivos_a_excel(uploaded_files):
     regex_documento = re.compile(r"^(CC|TI|CE|RC|NIT)\s+(\d{5,})\s+(.+)$")
     wb = openpyxl.Workbook()
@@ -81,18 +110,16 @@ def transformar_archivos_a_excel(uploaded_files):
     out.seek(0)
     return out, archivos, filas
 
+
 # ===========================
 # MÓDULO 2 – FIRMAR PDFs
 # ===========================
-
 def firmar_pdfs_en_zip(pdfs):
     import zipfile
 
-    # Cargar firma fija desde raíz del proyecto
     with open("firma.png", "rb") as f:
         firma_bytes = f.read()
 
-    # Convertir a PNG RGBA (por seguridad)
     img = Image.open(io.BytesIO(firma_bytes)).convert("RGBA")
     buffer_img = io.BytesIO()
     img.save(buffer_img, format="PNG")
@@ -133,17 +160,14 @@ def firmar_pdfs_en_zip(pdfs):
 # ===========================
 # MÓDULO 3 – CANCELADAS
 # ===========================
-
 def reprogramar_canceladas_excel(file_bytes):
     from openpyxl import load_workbook
 
-    # Leer archivo origen (soporta xls/xlsx)
     try:
         df = pd.read_excel(io.BytesIO(file_bytes), header=None)
     except Exception:
         df = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="xlrd")
 
-    # Tomar fecha de impresión desde B1 (fila 0, col 1)
     impresion_origen = ""
     try:
         if isinstance(df.iloc[0, 1], str):
@@ -257,7 +281,6 @@ def reprogramar_canceladas_excel(file_bytes):
 # ===========================
 # MÓDULO 4 – INASISTIDAS
 # ===========================
-
 def reprogramar_inasistidas_xls(file_bytes):
     from openpyxl import load_workbook
 
@@ -322,13 +345,13 @@ def reprogramar_inasistidas_xls(file_bytes):
 # ===========================
 # MÓDULO 5 – CERTIFICADOS COOMEVA
 # ===========================
-
 def limpiar_linea_coomeva(texto: str) -> str:
     if texto is None:
         return ""
     texto = texto.replace("\xa0", " ")
     texto = re.sub(r"[ \t]+", " ", texto)
     return texto.strip()
+
 
 def extraer_texto_pdf_bytes(file_bytes) -> str:
     texto = []
@@ -337,8 +360,10 @@ def extraer_texto_pdf_bytes(file_bytes) -> str:
             texto.append(page.get_text("text"))
     return "\n".join(texto)
 
+
 def obtener_lineas_coomeva(texto: str):
     return [limpiar_linea_coomeva(x) for x in texto.splitlines() if limpiar_linea_coomeva(x)]
+
 
 def buscar_indice_linea_coomeva(lineas, patron_exacto):
     for i, linea in enumerate(lineas):
@@ -346,21 +371,27 @@ def buscar_indice_linea_coomeva(lineas, patron_exacto):
             return i
     return -1
 
+
 def es_numero_puro_coomeva(linea: str) -> bool:
     return bool(re.fullmatch(r"\d{5,}", linea))
+
 
 def es_fecha_coomeva(linea: str) -> bool:
     return bool(re.fullmatch(r"\d{2}/\d{2}/\d{4}", linea))
 
+
 def es_cups_coomeva(linea: str) -> bool:
     return bool(re.fullmatch(r"\d{4}[A-Z]\d{2}", linea))
+
 
 def es_valor_monetario_coomeva(linea: str) -> bool:
     return bool(re.fullmatch(r"[\d\.,]+", linea))
 
+
 def extraer_carnet_coomeva(texto: str) -> str:
     m = re.search(r"([A-Z0-9]+)\s+Fecha\s+Generaci[oó]n\s*:", texto, flags=re.IGNORECASE)
     return m.group(1).strip() if m else ""
+
 
 def a_numero_coomeva(valor: str):
     valor = limpiar_linea_coomeva(valor)
@@ -371,6 +402,7 @@ def a_numero_coomeva(valor: str):
         return float(valor)
     except ValueError:
         return None
+
 
 def extraer_datos_usuario_coomeva(texto: str, archivo: str) -> dict:
     lineas = obtener_lineas_coomeva(texto)
@@ -416,14 +448,6 @@ def extraer_datos_usuario_coomeva(texto: str, archivo: str) -> dict:
     idx_documento = buscar_indice_linea_coomeva(head, "Documento")
 
     if idx_documento != -1:
-        # Estructura real detectada:
-        # Documento
-        # APELLIDOS
-        # NIT CLINICA
-        # NOMBRE CLINICA
-        # NOMBRE
-        # DOCUMENTO
-        # PROGRAMA
         if idx_documento + 1 < len(head):
             apellidos = head[idx_documento + 1]
 
@@ -449,6 +473,7 @@ def extraer_datos_usuario_coomeva(texto: str, archivo: str) -> dict:
         "Fecha_Generacion": fecha_generacion,
         "Edad": edad,
     }
+
 
 def extraer_tabla_procedimientos_coomeva(texto: str):
     lineas = obtener_lineas_coomeva(texto)
@@ -536,6 +561,7 @@ def extraer_tabla_procedimientos_coomeva(texto: str):
             i += 1
 
     return detalles
+
 
 def transformar_certificados_coomeva(uploaded_files):
     registros = []
@@ -642,7 +668,6 @@ def transformar_certificados_coomeva(uploaded_files):
 # ===========================
 # UI STREAMLIT
 # ===========================
-
 st.set_page_config("Denti Manager Web", layout="centered")
 st.title("Denti Manager")
 
@@ -705,23 +730,49 @@ with tab5:
         "Sube los certificados Coomeva en PDF",
         type=["pdf"],
         accept_multiple_files=True,
-        key="coomeva_pdfs"
+        key=f"coomeva_pdfs_{st.session_state.coomeva_uploader_key}"
     )
 
-    if st.button("Procesar Certificados Coomeva", key="btn_coomeva", disabled=not files):
-        out, archivos, filas, df_preview, df_err = transformar_certificados_coomeva(files)
-        st.success(f"Archivos procesados: {archivos} | Filas generadas: {filas}")
+    col1, col2 = st.columns([3, 1])
 
-        if not df_preview.empty:
-            st.dataframe(df_preview.head())
+    with col1:
+        if st.button("Procesar Certificados Coomeva", key="btn_coomeva", disabled=not files):
+            out, archivos, filas, df_preview, df_err = transformar_certificados_coomeva(files)
 
-        if not df_err.empty:
-            st.warning("Algunos archivos presentaron errores.")
-            st.dataframe(df_err)
+            st.session_state.coomeva_resultado = out.getvalue()
+            st.session_state.coomeva_preview = df_preview
+            st.session_state.coomeva_errores = df_err
+            st.session_state.coomeva_resumen = {
+                "archivos": archivos,
+                "filas": filas
+            }
 
+    with col2:
+        if st.button(
+            "🗑️ Limpiar archivos",
+            key="btn_limpiar_coomeva",
+            disabled=not files and st.session_state.coomeva_resultado is None
+        ):
+            limpiar_coomeva()
+            st.rerun()
+
+    if st.session_state.coomeva_resumen:
+        st.success(
+            f"Archivos procesados: {st.session_state.coomeva_resumen['archivos']} | "
+            f"Filas generadas: {st.session_state.coomeva_resumen['filas']}"
+        )
+
+    if st.session_state.coomeva_preview is not None and not st.session_state.coomeva_preview.empty:
+        st.dataframe(st.session_state.coomeva_preview.head())
+
+    if st.session_state.coomeva_errores is not None and not st.session_state.coomeva_errores.empty:
+        st.warning("Algunos archivos presentaron errores.")
+        st.dataframe(st.session_state.coomeva_errores)
+
+    if st.session_state.coomeva_resultado is not None:
         st.download_button(
             "Descargar Excel Coomeva",
-            out,
+            st.session_state.coomeva_resultado,
             f"COOMEVA_{now_stamp()}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dl_coomeva"
