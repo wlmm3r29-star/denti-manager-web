@@ -24,6 +24,8 @@ def patient_details(original, page_index):
         def value(label):
             matches = page.search_for(label + ":")
             if not matches:
+                matches = [fitz.Rect(w[:4]) for w in words if w[4].rstrip(':').casefold() == label.casefold()]
+            if not matches:
                 return ""
             # Prefer the label in the patient column on the left.
             box = min(matches, key=lambda r: (r.x0, r.y0))
@@ -170,7 +172,7 @@ def render():
         if st.session_state.get('patient_signed_context') != signature_id:
             st.session_state.patient_signed_context = signature_id
             st.session_state.patient_signed_at = datetime.now(ZoneInfo('America/Bogota'))
-        details_key = f'patient_details_{page_index}'
+        details_key = f'patient_details_v2_{page_index}'
         if details_key not in st.session_state:
             st.session_state[details_key] = patient_details(original,page_index)
         patient_name,patient_doc = st.session_state[details_key]
