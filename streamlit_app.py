@@ -781,5 +781,6 @@ with tab5:
 
 
 with tab6:
+    # Firmas Wacom: pantalla permanente y archivo identificado por paciente y fecha.
     from firmas_paciente import render
     render()
