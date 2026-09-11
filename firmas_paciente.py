@@ -10,6 +10,12 @@ import streamlit as st
 import streamlit.components.v2 as components
 
 ROOT = Path(__file__).parent
+select_area = components.component(
+    "pdf_signature_area",
+    html='<canvas aria-label="Documento PDF: arrastre para marcar el espacio de firma"></canvas><p role="status"></p>',
+    css='canvas {display:block;width:100%;cursor:crosshair;touch-action:none;background:white;border-radius:6px;} p {font-family:var(--st-font);color:var(--st-text-color);}',
+    js=(ROOT / "pdf_signature_area.js").read_text(encoding="utf-8"),
+)
 capture = components.component(
     "wacom_stu540",
     html='''<div><button id="connect">Conectar Wacom STU-540</button>
@@ -90,32 +96,20 @@ def render():
             page_index = st.number_input("Página que va a firmar", 1, len(doc), len(doc), key="patient_page") - 1
             page = doc[page_index]
             width, height = page.rect.width, page.rect.height
-            candidates = []
-            for widget in page.widgets() or []:
-                if widget.field_type == fitz.PDF_WIDGET_TYPE_SIGNATURE and not widget.field_value:
-                    candidates.append((f"Campo: {widget.field_label or widget.field_name}", widget.rect * page.rotation_matrix))
-            for label in ("Firma Paciente", "Firma del Paciente", "Firma Usuario", "Firma del Usuario"):
-                for found in page.search_for(label):
-                    found = found * page.rotation_matrix
-                    candidate = fitz.Rect(found.x0, max(0,found.y0-55), min(width,found.x0+150),found.y0)
-                    if not candidate.is_empty:
-                        candidates.append((f"{label} ({len(candidates)+1})",candidate))
-            choice = st.selectbox("Campo de firma", ["Ubicación manual"]+[name for name,_ in candidates], key=f"patient_field_{page_index}")
-            st.caption("Ubicación en porcentajes de la página, medidos desde la esquina superior izquierda.")
-            cols = st.columns(2)
-            x = cols[0].slider("Izquierda (%)", 0, 90, 10, key="patient_x")
-            y = cols[1].slider("Arriba (%)", 0, 90, 75, key="patient_y")
-            w = cols[0].slider("Ancho (%)", 5, 100 - x, min(30, 100 - x), key="patient_w")
-            h = cols[1].slider("Alto (%)", 3, 100 - y, min(12, 100 - y), key="patient_h")
-            box = fitz.Rect(x * width / 100, y * height / 100, (x+w)*width/100, (y+h)*height/100)
-            if choice != "Ubicación manual":
-                box = next(rect for name,rect in candidates if name == choice)
-                st.caption("Se utiliza el campo seleccionado. Para ajustar los porcentajes, elija Ubicación manual.")
-            if page.rotation:
-                page.remove_rotation()
-            page.draw_rect(box, color=(0, .5, .8), width=1.5)
+            st.write("Arrastre sobre el PDF para marcar el espacio donde quiere colocar la firma. Puede dibujar otro recuadro para cambiarlo.")
             pix = page.get_pixmap(matrix=fitz.Matrix(min(1.5, 1200/width), min(1.5, 1200/width)))
-            st.image(pix.tobytes("png"), caption="El recuadro azul indica dónde quedará la firma.")
+            area_key = f"patient_area_{epoch}_{identity}_{page_index}"
+            current_area = st.session_state.get(area_key, {}).get("selection")
+            selected = select_area(key=area_key, data={"image":base64.b64encode(pix.tobytes("png")).decode(), "selection":current_area},
+                                   default={"selection":None}, on_selection_change=lambda: None)
+            if not selected.selection:
+                return
+            coords = selected.selection
+            if not isinstance(coords, list) or len(coords) != 4 or not all(isinstance(v,(int,float)) and 0 <= v <= 1 for v in coords):
+                raise ValueError("Seleccione de nuevo el espacio de firma.")
+            box = fitz.Rect(coords[0]*width,coords[1]*height,coords[2]*width,coords[3]*height)
+            if box.width < 8 or box.height < 3:
+                raise ValueError("Dibuje un recuadro más grande para la firma.")
         accepted = st.session_state.get("patient_signature")
         if accepted:
             if st.button("Repetir firma", key="patient_repeat"):
