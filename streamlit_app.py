@@ -671,12 +671,13 @@ def transformar_certificados_coomeva(uploaded_files):
 st.set_page_config("Denti Manager Web", layout="centered")
 st.title("Denti Manager")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📄 PDF → Excel",
     "✍️ Firmar PDFs",
     "🚷 Citas Canceladas",
     "🔄 Citas Inasistidas",
-    "🦷 Certificados Coomeva"
+    "🦷 Certificados Coomeva",
+    "🖊️ Firmas paciente"
 ])
 
 with tab1:
@@ -777,3 +778,8 @@ with tab5:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dl_coomeva"
         )
+
+
+with tab6:
+    from firmas_paciente import render
+    render()
