@@ -18,13 +18,13 @@ function createConnection(){
   async function showScreen(){
     sc.fillStyle='white';sc.fillRect(0,0,800,480);sc.fillStyle='#142d40';sc.fillRect(0,0,800,75);
     sc.fillStyle='white';sc.font='bold 28px Arial';sc.fillText('Denti Manager | Firma del paciente',25,48);
-    if(m.context){
+    {
       sc.strokeStyle='#668899';sc.lineWidth=2;sc.strokeRect(25,95,750,285);
-      sc.fillStyle='#555';sc.font='18px Arial';sc.fillText('Firme dentro del recuadro con el lapiz',35,365);
+      sc.fillStyle='#555';sc.font='18px Arial';sc.fillText(m.accepted?'Firma recibida. Espere el siguiente documento.':m.context?'Firme dentro del recuadro con el lapiz':'Lista. Seleccione el espacio en el PDF.',35,365);
       for(const [x,color,label] of [[25,'#526777','REPETIR'],[415,'#08785c','ACEPTAR']]){
         sc.fillStyle=color;sc.fillRect(x,405,360,55);sc.fillStyle='white';sc.font='bold 24px Arial';sc.fillText(label,x+120,440);
       }
-    }else{sc.fillStyle='#142d40';sc.font='26px Arial';sc.fillText('Lista. Seleccione el espacio en el PDF.',35,230);}
+    }
     const rgba=sc.getImageData(0,0,800,480).data,bgr=new Uint8Array(800*480*3);
     for(let p=0,o=0;p<rgba.length;p+=4){bgr[o++]=rgba[p+2];bgr[o++]=rgba[p+1];bgr[o++]=rgba[p];}
     message('Wacom conectada. Preparando pantalla…');await send(37,[4]);
@@ -33,9 +33,9 @@ function createConnection(){
   }
   async function sync(){
     if(!m.device || m.context===m.desired)return;
-    await send(33,[0]);clearInk();m.context=m.desired;m.accepted=false;
-    await showScreen();await send(33,[m.context?1:0]);
-    message(m.context?'Wacom lista. Firme y pulse ACEPTAR en la tablet.':'Wacom conectada. Cargue el PDF y marque el espacio de firma.');
+    await send(33,[0]);clearInk();m.context=m.desired;m.accepted=!!m.completed;
+    await showScreen();await send(33,[m.context && !m.accepted?1:0]);
+    message(m.accepted?'Firma aceptada. El PDF está listo para descargar.':m.context?'Wacom lista. Firme y pulse ACEPTAR en la tablet.':'Wacom conectada. Cargue el PDF y marque el espacio de firma.');
   }
   async function open(device){
     if(m.device || !device || m.paused)return;
@@ -71,8 +71,8 @@ function createConnection(){
     const pixels=ctx.getImageData(0,0,800,480).data;let minX=800,minY=480,maxX=0,maxY=0;
     for(let y=0;y<480;y++)for(let x=0;x<800;x++)if(pixels[(y*800+x)*4+3]){minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}
     if(maxX-minX<8 || maxY-minY<3){message('Firma incompleta. Haga un trazo más amplio o pulse REPETIR.');return;}
-    const payload={context:m.context,png:ink.toDataURL('image/png')};m.accepted=true;
-    await send(33,[0]);await send(32,[0]);clearInk();message('Firma aceptada. El PDF está listo para descargar.');m.view?.emit(payload);
+    const payload={context:m.context,png:ink.toDataURL('image/png'),acceptedAt:new Date().toISOString()};m.accepted=true;
+    await send(33,[0]);clearInk();await showScreen();message('Firma aceptada. El PDF está listo para descargar.');m.view?.emit(payload);
   });
   function pen(e){
     if(!m.view || m.busy || !m.context || m.context!==m.desired || m.accepted || ![1,52].includes(e.reportId))return;
@@ -92,7 +92,14 @@ function createConnection(){
   window.addEventListener('pagehide',()=>{void close();});return m;
 }
 export default function({parentElement,data,setStateValue}){
-  const slot=Symbol.for('denti.wacom.connection.v2'),m=window[slot]??(window[slot]=createConnection());
+  const slot=Symbol.for('denti.wacom.connection.v3');
+  if(!window[slot]){
+    const previous=window[Symbol.for('denti.wacom.connection.v2')];
+    const next=createConnection();
+    if(previous)next.queue=previous.disconnect();
+    window[slot]=next;
+  }
+  const m=window[slot];m.completed=!!data.completed;
   const q=s=>parentElement.querySelector(s);
   const view={emit:p=>setStateValue('signature',p),update:s=>{
     q('#status').textContent=s.message;q('#connect').disabled=s.busy || !!s.device;

@@ -12,6 +12,9 @@
 ## Configuración y límites
 
 - No requiere suscripción de captura, sign pro PDF ni Signature SDK. El protocolo de referencia es MIT; se incluye su licencia.
+- El archivo se llama NOMBRE_APELLIDOS_DOCUMENTO_AAAA-MM-DD_HHMMSS.pdf. Nombre, apellidos y documento se leen de los rótulos del PDF en la página firmada. Si faltan datos o es un escaneado, se solicitan solo los datos necesarios para nombrarlo. La fecha y hora corresponden a la recepción de la firma aceptada, hora de Colombia; no a la fecha de generación del certificado. No cambia al volver a descargar.
+- Para guardar al pulsar Descargar sin elegir carpeta: en Chrome, Configuración > Descargas, desactive “Preguntar dónde se guardará cada archivo antes de descargarlo”. Este ajuste pertenece a cada navegador, no a Streamlit. Se usa la carpeta predeterminada de Chrome.
+- El recuadro y los dos botones de la tablet permanecen visibles entre pacientes y después de aceptar. La firma anterior se borra; fuera de una captura activa los botones no aceptan trazos.
 - La conexión USB permanece abierta entre firmas, cambios de paciente y recálculos de Streamlit. No se guarda la firma para otro paciente. Al recargar la página se recupera el permiso existente con getDevices; no se abre un permiso nuevo automáticamente. Chrome, la página y el computador deben permanecer activos. Desconectar está disponible solo en la web para el operador.
 - No modifica firmware, modo USB/serial ni restaura valores de fábrica. Guarda los ajustes de escritura, tinta, fondo y brillo; los restaura al cerrar la conexión. Desenchufar o cerrar abruptamente el navegador puede impedir la restauración; vuelva a conectar para verificar.
 - Pantalla personalizada temporal de 800 × 480. La transferencia USB de la pantalla puede tardar; espere el mensaje de conexión antes de escribir.

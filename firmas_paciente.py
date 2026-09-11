@@ -2,6 +2,10 @@
 import base64
 import hashlib
 import io
+import re
+import unicodedata
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import fitz
@@ -10,6 +14,39 @@ import streamlit as st
 import streamlit.components.v2 as components
 
 ROOT = Path(__file__).parent
+
+
+def patient_details(original, page_index):
+    """Read labeled values on the selected page without crossing into other columns."""
+    with fitz.open(stream=original, filetype="pdf") as doc:
+        page = doc[page_index]
+        words = page.get_text("words")
+        def value(label):
+            matches = page.search_for(label + ":")
+            if not matches:
+                return ""
+            # Prefer the label in the patient column on the left.
+            box = min(matches, key=lambda r: (r.x0, r.y0))
+            middle = (box.y0+box.y1)/2
+            row = sorted((w for w in words if abs((w[1]+w[3])/2-middle)<3 and w[0]>=box.x1-1),key=lambda w:w[0])
+            output=[]
+            for w in row:
+                if ':' in w[4] or w[4].lower() in ('plan','tarifario','razón','razon','nit','teléfono','telefono','edad','fecha'):
+                    break
+                output.append(w[4])
+            return " ".join(output).strip()
+        name, surnames, document = value('Nombre'), value('Apellidos'), value('Documento')
+        # Preserve leading zeros. Reject extra columns or non-document text.
+        if not re.fullmatch(r'(?:(?:CC|TI|CE|RC|PA|PEP|PPT)\s*)?[A-Z0-9.-]{4,25}',document,re.I):
+            document = ""
+        return " ".join(v for v in (name,surnames) if v),document
+
+
+def signed_filename(name, document, signed_at):
+    def clean(value):
+        value = unicodedata.normalize('NFKD',value).encode('ascii','ignore').decode().upper()
+        return re.sub(r'[^A-Z0-9]+','_',value).strip('_')[:100]
+    return f"{clean(name)}_{clean(document)}_{signed_at.strftime('%Y-%m-%d_%H%M%S')}.pdf"
 select_area = components.component(
     "pdf_signature_area",
     html='<canvas aria-label="Documento PDF: arrastre para marcar el espacio de firma"></canvas><p role="status"></p>',
@@ -119,7 +156,9 @@ def prepare_document():
 def render():
     document = prepare_document()
     context = document[-1] if document else None
-    result = capture(key="wacom_connection", data={"context":context},
+    previous = st.session_state.get('wacom_connection',{}).get('signature')
+    completed = bool(context and isinstance(previous,dict) and previous.get('context') == context)
+    result = capture(key="wacom_connection", data={"context":context,"completed":completed},
                      default={"signature":None}, on_signature_change=lambda:None)
     payload = result.signature
     if not document or not isinstance(payload,dict) or payload.get("context") != context:
@@ -127,9 +166,25 @@ def render():
     try:
         original,page_index,box,name,_ = document
         signature = signature_png(payload.get("png"))
+        signature_id = hashlib.sha256((context+payload.get('png','')+str(payload.get('acceptedAt',''))).encode()).hexdigest()
+        if st.session_state.get('patient_signed_context') != signature_id:
+            st.session_state.patient_signed_context = signature_id
+            st.session_state.patient_signed_at = datetime.now(ZoneInfo('America/Bogota'))
+        details_key = f'patient_details_{page_index}'
+        if details_key not in st.session_state:
+            st.session_state[details_key] = patient_details(original,page_index)
+        patient_name,patient_doc = st.session_state[details_key]
+        if not patient_name or not patient_doc:
+            st.info('Complete los datos que no se pudieron leer del PDF para nombrar el archivo.')
+            patient_name = st.text_input('Nombre y apellidos',value=patient_name,key='patient_filename_name')
+            patient_doc = st.text_input('Documento',value=patient_doc,key='patient_filename_document')
+            if not patient_name.strip() or not patient_doc.strip():
+                return
+        filename = signed_filename(patient_name,patient_doc,st.session_state.patient_signed_at)
         output = signed_pdf(original,signature,page_index,box)
         st.success("Firma aceptada. Documento listo para descargar.")
-        st.download_button("Descargar PDF firmado",output,Path(name).stem+"_firmado.pdf",mime="application/pdf",key="patient_download")
+        st.download_button("Descargar PDF firmado",output,filename,mime="application/pdf",key="patient_download",on_click="ignore")
+        st.caption(filename)
         if st.button("Volver a firmar este documento",key="patient_repeat"):
             st.session_state.patient_capture_generation = st.session_state.get("patient_capture_generation",0)+1
             st.rerun()
