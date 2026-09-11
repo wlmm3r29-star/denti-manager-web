@@ -3,15 +3,16 @@
 1. Abra la web directamente en Chrome o Edge de escritorio (HTTPS).
 2. Conecte una STU-540 en modo USB HID y cierre sign pro PDF u otras aplicaciones de captura.
 3. En **Firmas paciente**, cargue cualquier PDF y elija la página. Arrastre directamente sobre el documento para dibujar el espacio de la firma. Dibuje otro recuadro si quiere cambiarlo.
-4. Pulse **Conectar Wacom STU-540** y elija la tablet en el permiso del navegador.
+4. La Wacom se conecta automáticamente si Chrome conserva el permiso USB. La primera vez, pulse **Conectar Wacom STU-540** y elija la tablet.
 5. Espere a que termine de cargar la pantalla. Firme dentro del recuadro.
-6. Use **REVISAR**, **BORRAR** o **CANCELAR** en la tablet. Después de revisar pulse **ACEPTAR**. Los controles también están en el computador.
-7. Revise el PDF final en la web, marque la confirmación y descargue el PDF firmado.
+6. La tablet tiene solo **REPETIR** y **ACEPTAR**. Repetir limpia el trazo; Aceptar lo coloca en el espacio seleccionado.
+7. Descargue el PDF firmado directamente. No hay pantalla de vista previa adicional ni confirmación intermedia.
 8. Pulse **Nuevo paciente / limpiar** antes de pasar al siguiente paciente.
 
 ## Configuración y límites
 
 - No requiere suscripción de captura, sign pro PDF ni Signature SDK. El protocolo de referencia es MIT; se incluye su licencia.
+- La conexión USB permanece abierta entre firmas, cambios de paciente y recálculos de Streamlit. No se guarda la firma para otro paciente. Al recargar la página se recupera el permiso existente con getDevices; no se abre un permiso nuevo automáticamente. Chrome, la página y el computador deben permanecer activos. Desconectar está disponible solo en la web para el operador.
 - No modifica firmware, modo USB/serial ni restaura valores de fábrica. Guarda los ajustes de escritura, tinta, fondo y brillo; los restaura al cerrar la conexión. Desenchufar o cerrar abruptamente el navegador puede impedir la restauración; vuelva a conectar para verificar.
 - Pantalla personalizada temporal de 800 × 480. La transferencia USB de la pantalla puede tardar; espere el mensaje de conexión antes de escribir.
 - STU-540 únicamente. Firefox y Safari no ofrecen la conexión WebHID necesaria. Si una política del navegador/alojamiento bloquea HID, se muestra el error; no se desactivan protecciones.
@@ -22,7 +23,7 @@
 
 ## Validación
 
-Pruebas automáticas: inicio de los seis módulos; rechazo de firmas vacías; inserción y límites de página; rotaciones 0/90/180/270; captura, revisión, borrado y restauración con HID simulado.
+Pruebas automáticas: inicio de los seis módulos; rechazo de firmas vacías; inserción y límites de página; rotaciones 0/90/180/270; conexión automática, continuidad entre firmas, repetir, cambio de paciente y reconexión con HID simulado.
 La verificación de hardware real debe hacerse con una firma de prueba en la STU-540 conectada al navegador.
 
 Referencias:
