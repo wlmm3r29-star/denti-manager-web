@@ -16,9 +16,10 @@ function createConnection(){
     try{await action();}catch(e){await close();message(`No se pudo conectar o capturar: ${e.message}. Cierre otros programas de firma y pulse Conectar.`);}
     finally{m.busy=false;update();}});return m.queue;}
   async function showScreen(){
-    sc.fillStyle='white';sc.fillRect(0,0,800,480);sc.fillStyle='#142d40';sc.fillRect(0,0,800,75);
-    sc.fillStyle='white';sc.font='bold 28px Arial';sc.fillText('Denti Manager | Firma del paciente',25,48);
-    {
+    sc.fillStyle='white';sc.fillRect(0,0,800,480);
+    if(m.context && !m.accepted){
+      sc.fillStyle='#142d40';sc.fillRect(0,0,800,75);
+      sc.fillStyle='white';sc.font='bold 28px Arial';sc.fillText('Denti Manager | Firma del paciente',25,48);
       sc.strokeStyle='#668899';sc.lineWidth=2;sc.strokeRect(25,95,750,285);
       sc.fillStyle='#555';sc.font='18px Arial';sc.fillText(m.accepted?'Gracias. Su firma ha sido recibida.':m.context?'Firme dentro del recuadro y pulse ACEPTAR':'Por favor, espere la indicación de recepción para firmar.',35,365);
       for(const [x,color,label] of [[25,'#526777','REPETIR'],[415,'#08785c','ACEPTAR']]){
@@ -92,9 +93,9 @@ function createConnection(){
   window.addEventListener('pagehide',()=>{void close();});return m;
 }
 export default function({parentElement,data,setStateValue}){
-  const slot=Symbol.for('denti.wacom.connection.v5');
+  const slot=Symbol.for('denti.wacom.connection.v6');
   if(!window[slot]){
-    const previous=window[Symbol.for('denti.wacom.connection.v4')] || window[Symbol.for('denti.wacom.connection.v3')] || window[Symbol.for('denti.wacom.connection.v2')];
+    const previous=window[Symbol.for('denti.wacom.connection.v5')] || window[Symbol.for('denti.wacom.connection.v4')] || window[Symbol.for('denti.wacom.connection.v3')] || window[Symbol.for('denti.wacom.connection.v2')];
     const next=createConnection();
     if(previous)next.queue=previous.disconnect();
     window[slot]=next;

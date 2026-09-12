@@ -12,12 +12,12 @@ export default function({parentElement,data,setStateValue}) {
       ctx.fillRect(x*canvas.width,y*canvas.height,(x2-x)*canvas.width,(y2-y)*canvas.height);
       ctx.strokeRect(x*canvas.width,y*canvas.height,(x2-x)*canvas.width,(y2-y)*canvas.height);
     }
-    label.textContent=rect?'Espacio de firma seleccionado. Puede marcar otro recuadro para cambiarlo.':'Marque el espacio de la firma arrastrando sobre el documento.';
+    label.textContent=data.locked?'Firma aceptada. Pulse Repetir firma para habilitar la tablet de nuevo.':rect?'Espacio de firma seleccionado. Puede marcar otro recuadro para cambiarlo.':'Marque el espacio de la firma arrastrando sobre el documento.';
   }
   image.onload=()=>{if(!active)return;canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;ready=true;draw();};
   image.src='data:image/png;base64,'+data.image;
   function position(e){const b=canvas.getBoundingClientRect();return [Math.max(0,Math.min(1,(e.clientX-b.left)/b.width)),Math.max(0,Math.min(1,(e.clientY-b.top)/b.height))];}
-  canvas.onpointerdown=e=>{if(!ready || e.button!==0)return;e.preventDefault();start=position(e);canvas.setPointerCapture(e.pointerId);};
+  canvas.onpointerdown=e=>{if(data.locked || !ready || e.button!==0)return;e.preventDefault();start=position(e);canvas.setPointerCapture(e.pointerId);};
   canvas.onpointermove=e=>{if(!start)return;const end=position(e);rect=[Math.min(start[0],end[0]),Math.min(start[1],end[1]),Math.max(start[0],end[0]),Math.max(start[1],end[1])];draw();};
   canvas.onpointerup=e=>{
     if(!start)return;

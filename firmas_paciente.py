@@ -147,14 +147,15 @@ def prepare_document():
             if doc.needs_pass or len(doc) == 0:
                 st.error("Suba un PDF sin contraseña y con al menos una página.")
                 return
-            page_index = st.number_input("Página que va a firmar", 1, len(doc), len(doc), key="patient_page") - 1
+            locked = st.session_state.get('patient_capture_locked', False)
+            page_index = st.number_input("Página que va a firmar", 1, len(doc), len(doc), key="patient_page", disabled=locked) - 1
             page = doc[page_index]
             width, height = page.rect.width, page.rect.height
             st.write("Arrastre sobre el PDF para marcar el espacio donde quiere colocar la firma. Puede dibujar otro recuadro para cambiarlo.")
             pix = page.get_pixmap(matrix=fitz.Matrix(min(1.5, 1200/width), min(1.5, 1200/width)))
             area_key = f"patient_area_{epoch}_{identity}_{page_index}"
             current_area = st.session_state.get(area_key, {}).get("selection")
-            selected = select_area(key=area_key, data={"image":base64.b64encode(pix.tobytes("png")).decode(), "selection":current_area},
+            selected = select_area(key=area_key, data={"image":base64.b64encode(pix.tobytes("png")).decode(), "selection":current_area,"locked":locked},
                                    default={"selection":None}, on_selection_change=lambda: None)
             if not selected.selection:
                 return
@@ -171,13 +172,19 @@ def prepare_document():
         st.error(f"No se pudo preparar la firma: {exc}")
 
 
+def lock_accepted_capture():
+    payload = st.session_state.get('wacom_connection', {}).get('signature')
+    if isinstance(payload, dict) and payload.get('png'):
+        st.session_state.patient_capture_locked = True
+
+
 def render():
     document = prepare_document()
     context = document[-1] if document else None
     previous = st.session_state.get('wacom_connection',{}).get('signature')
     completed = bool(context and isinstance(previous,dict) and previous.get('context') == context)
     result = capture(key="wacom_connection", data={"context":context,"completed":completed},
-                     default={"signature":None}, on_signature_change=lambda:None)
+                     default={"signature":None}, on_signature_change=lock_accepted_capture)
     payload = result.signature
     if not document or not isinstance(payload,dict) or payload.get("context") != context:
         return
@@ -217,7 +224,8 @@ def render():
         st.session_state.patient_signed_pdf = output
         st.download_button("Descargar PDF firmado",output,filename,mime="application/pdf",key="patient_download",on_click="ignore")
         st.caption(filename)
-        if st.button("Volver a firmar este documento",key="patient_repeat"):
+        if st.button("Repetir firma",key="patient_repeat"):
+            st.session_state.patient_capture_locked = False
             st.session_state.patient_capture_generation = st.session_state.get("patient_capture_generation",0)+1
             st.rerun()
     except Exception as exc:

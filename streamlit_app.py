@@ -792,6 +792,6 @@ with tab5:
 
 
 with tab6:
-    # Firmas Wacom: firma del paciente y botón opcional para el prestador.
+    # Firmas Wacom: pantalla blanca fuera de captura; repetir desde la web.
     from firmas_paciente import render
     render()
