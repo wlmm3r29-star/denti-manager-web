@@ -789,6 +789,6 @@ with tab5:
 
 
 with tab6:
-    # Firmas Wacom: mensajes de la tablet dirigidos al paciente.
+    # Firmas Wacom: firma del paciente y botón opcional para el prestador.
     from firmas_paciente import render
     render()

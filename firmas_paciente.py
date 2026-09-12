@@ -101,6 +101,23 @@ def signed_pdf(original, signature, page_number, rect):
         return doc.tobytes(garbage=3, deflate=True)
 
 
+def add_provider_signature(original, page_index):
+    """Add the saved provider signature only at an unambiguous labeled position."""
+    with fitz.open(stream=original, filetype="pdf") as doc:
+        page = doc[page_index]
+        if page.rotation:
+            page.remove_rotation()
+        labels = page.search_for("Firma Prestador")
+        if len(labels) != 1:
+            raise ValueError("No se encontró un único campo 'Firma Prestador' en esta página. El PDF conserva solo la firma del paciente.")
+        label = labels[0]
+        box = fitz.Rect(label.x0, label.y1 - 55 + 8, label.x0 + 140, label.y1 + 8)
+        if not page.rect.contains(box):
+            raise ValueError("El espacio del prestador queda fuera de la página. El PDF conserva solo la firma del paciente.")
+        page.insert_image(box, stream=(ROOT / "firma.png").read_bytes(), keep_proportion=True, overlay=True)
+        return doc.tobytes(garbage=3, deflate=True)
+
+
 def prepare_document():
     st.subheader("Firmas paciente")
     st.write("Cargue el PDF, marque el espacio y firme en la tablet. Al aceptar, podrá descargar el documento firmado.")
@@ -184,6 +201,20 @@ def render():
             patient_name = st.text_input('Nombre y apellidos',value=patient_name,key='patient_filename_name')
             patient_doc = st.text_input('Documento',value=patient_doc,key='patient_filename_document')
         filename = signed_filename(patient_name.strip() or Path(name).stem,patient_doc.strip() or 'SIN_DOCUMENTO',st.session_state.patient_signed_at)
+        provider_added = st.session_state.get('patient_provider_signature') == signature_id
+        if st.button("Firmar prestador", key="patient_add_provider", disabled=provider_added,
+                     help="Añade la firma guardada del prestador al campo 'Firma Prestador' de esta página."):
+            try:
+                output = add_provider_signature(output, page_index)
+                st.session_state.patient_provider_signature = signature_id
+                provider_added = True
+            except Exception as exc:
+                st.warning(str(exc))
+        elif provider_added:
+            output = add_provider_signature(output, page_index)
+        if provider_added:
+            st.success("Firma del prestador añadida. Puede descargar el PDF con ambas firmas.")
+        st.session_state.patient_signed_pdf = output
         st.download_button("Descargar PDF firmado",output,filename,mime="application/pdf",key="patient_download",on_click="ignore")
         st.caption(filename)
         if st.button("Volver a firmar este documento",key="patient_repeat"):
