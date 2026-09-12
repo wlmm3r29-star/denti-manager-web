@@ -22,9 +22,9 @@ def patient_details(original, page_index):
         page = doc[page_index]
         words = page.get_text("words")
         def value(label):
-            matches = page.search_for(label + ":")
+            matches = [fitz.Rect(w[:4]) for w in words if w[4].rstrip(':').casefold() == label.casefold()]
             if not matches:
-                matches = [fitz.Rect(w[:4]) for w in words if w[4].rstrip(':').casefold() == label.casefold()]
+                matches = page.search_for(label + ":")
             if not matches:
                 return ""
             # Prefer the label in the patient column on the left.
@@ -176,7 +176,7 @@ def render():
         output = signed_pdf(original,signature,page_index,box)
         st.session_state.patient_signed_pdf = output
         st.success("Firma aceptada y conservada en esta sesión.")
-        details_key = f'patient_details_v3_{page_index}'
+        details_key = f'patient_details_v4_{page_index}'
         if details_key not in st.session_state:
             st.session_state[details_key] = patient_details(original,page_index)
         patient_name,patient_doc = st.session_state[details_key]

@@ -781,6 +781,6 @@ with tab5:
 
 
 with tab6:
-    # Firmas Wacom: espera hasta seleccionar el campo y descarga tras aceptar.
+    # Firmas Wacom: espera, descarga y documento del encabezado del paciente.
     from firmas_paciente import render
     render()
