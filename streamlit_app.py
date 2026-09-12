@@ -671,14 +671,22 @@ def transformar_certificados_coomeva(uploaded_files):
 st.set_page_config("Denti Manager Web", layout="centered")
 st.title("Denti Manager")
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, firmas, citas, tab5 = st.tabs([
     "📄 PDF → Excel",
-    "✍️ Firmar PDFs",
-    "🚷 Citas Canceladas",
-    "🔄 Citas Inasistidas",
-    "🦷 Certificados Coomeva",
-    "🖊️ Firmas paciente"
+    "✍️ Firmas",
+    "📅 Citas",
+    "🦷 Coomeva",
 ])
+
+with firmas:
+    st.caption("Seleccione el tipo de firma que necesita.")
+    tab6 = st.expander("🖊️ Firmas de pacientes · Wacom", expanded=True)
+    tab2 = st.expander("📄 Firmar PDFs · firma del prestador")
+
+with citas:
+    st.caption("Abra el grupo de citas que desea procesar.")
+    tab3 = st.expander("🚷 Citas canceladas")
+    tab4 = st.expander("🔄 Citas inasistidas")
 
 with tab1:
     files = st.file_uploader("PDFs", type=["pdf"], accept_multiple_files=True)
