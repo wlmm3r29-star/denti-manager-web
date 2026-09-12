@@ -14,6 +14,7 @@ import streamlit as st
 import streamlit.components.v2 as components
 
 ROOT = Path(__file__).parent
+UI_REVISION = "blank-native-v7"
 
 
 def patient_details(original, page_index):
@@ -56,7 +57,7 @@ select_area = components.component(
     js=(ROOT / "pdf_signature_area.js").read_text(encoding="utf-8"),
 )
 capture = components.component(
-    "wacom_stu540",
+    "wacom_stu540_blank_v7",
     html='''<div><button id="connect">Conectar Wacom STU-540</button>
     <button id="clear">Repetir</button><button id="accept">Aceptar firma</button>
     <button id="disconnect">Desconectar</button>
@@ -184,7 +185,7 @@ def render():
     previous = st.session_state.get('wacom_connection',{}).get('signature')
     completed = bool(context and isinstance(previous,dict) and previous.get('context') == context)
     result = capture(key="wacom_connection", data={"context":context,"completed":completed},
-                     default={"signature":None}, on_signature_change=lock_accepted_capture)
+                     default={"signature":previous}, on_signature_change=lock_accepted_capture)
     payload = result.signature
     if not document or not isinstance(payload,dict) or payload.get("context") != context:
         return

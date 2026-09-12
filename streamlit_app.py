@@ -792,6 +792,9 @@ with tab5:
 
 
 with tab6:
-    # Firmas Wacom: pantalla blanca fuera de captura; repetir desde la web.
-    from firmas_paciente import render
-    render()
+    # Refresh imported UI on deployment without restarting patient sessions.
+    import firmas_paciente as firmas_ui
+    if getattr(firmas_ui, "UI_REVISION", None) != "blank-native-v7":
+        import importlib
+        firmas_ui = importlib.reload(firmas_ui)
+    firmas_ui.render()

@@ -16,6 +16,12 @@ function createConnection(){
     try{await action();}catch(e){await close();message(`No se pudo conectar o capturar: ${e.message}. Cierre otros programas de firma y pulse Conectar.`);}
     finally{m.busy=false;update();}});return m.queue;}
   async function showScreen(){
+    if(!m.context || m.accepted){
+      await send(33,[0]);
+      await send(46,[255,255,255]);
+      await send(32,[0]);
+      return;
+    }
     sc.fillStyle='white';sc.fillRect(0,0,800,480);
     if(m.context && !m.accepted){
       sc.fillStyle='#142d40';sc.fillRect(0,0,800,75);
@@ -36,7 +42,7 @@ function createConnection(){
     if(!m.device || m.context===m.desired)return;
     await send(33,[0]);clearInk();m.context=m.desired;m.accepted=!!m.completed;
     await showScreen();await send(33,[m.context && !m.accepted?1:0]);
-    message(m.accepted?'Firma aceptada. El PDF está listo para descargar.':m.context?'Wacom lista. Firme y pulse ACEPTAR en la tablet.':'Wacom conectada. Cargue el PDF y marque el espacio de firma.');
+    message(m.accepted?'Firma aceptada. Pantalla en blanco. Puede descargar el PDF.':m.context?'Wacom lista. Firme y pulse ACEPTAR en la tablet.':'Wacom conectada. Pantalla en blanco hasta seleccionar el campo de firma.');
   }
   async function open(device){
     if(m.device || !device || m.paused)return;
@@ -73,7 +79,7 @@ function createConnection(){
     for(let y=0;y<480;y++)for(let x=0;x<800;x++)if(pixels[(y*800+x)*4+3]){minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}
     if(maxX-minX<8 || maxY-minY<3){message('Firma incompleta. Haga un trazo más amplio o pulse REPETIR.');return;}
     const payload={context:m.context,png:ink.toDataURL('image/png'),acceptedAt:new Date().toISOString()};m.accepted=true;
-    await send(33,[0]);clearInk();await showScreen();message('Firma aceptada. El PDF está listo para descargar.');m.view?.emit(payload);
+    await send(33,[0]);clearInk();await showScreen();message('Firma aceptada. Pantalla en blanco. Puede descargar el PDF.');m.view?.emit(payload);
   });
   function pen(e){
     if(!m.view || m.busy || !m.context || m.context!==m.desired || m.accepted || ![1,52].includes(e.reportId))return;
@@ -93,9 +99,9 @@ function createConnection(){
   window.addEventListener('pagehide',()=>{void close();});return m;
 }
 export default function({parentElement,data,setStateValue}){
-  const slot=Symbol.for('denti.wacom.connection.v6');
+  const slot=Symbol.for('denti.wacom.connection.v7');
   if(!window[slot]){
-    const previous=window[Symbol.for('denti.wacom.connection.v5')] || window[Symbol.for('denti.wacom.connection.v4')] || window[Symbol.for('denti.wacom.connection.v3')] || window[Symbol.for('denti.wacom.connection.v2')];
+    const previous=window[Symbol.for('denti.wacom.connection.v6')] || window[Symbol.for('denti.wacom.connection.v5')] || window[Symbol.for('denti.wacom.connection.v4')] || window[Symbol.for('denti.wacom.connection.v3')] || window[Symbol.for('denti.wacom.connection.v2')];
     const next=createConnection();
     if(previous)next.queue=previous.disconnect();
     window[slot]=next;
