@@ -105,7 +105,6 @@ def prepare_document():
     st.subheader("Firmas paciente")
     st.write("Cargue el PDF, marque el espacio y firme en la tablet. Al aceptar, podrá descargar el documento firmado.")
     st.caption("Chrome o Edge mantiene la Wacom conectada mientras la página esté abierta. Autorice el USB una vez; las siguientes conexiones son automáticas si Chrome conserva el permiso.")
-    st.caption("Captura sin suscripción ni SDK de pago. El PDF y la firma se procesan en la sesión de Streamlit; descargue el resultado antes de salir. Firma manuscrita como imagen, sin certificado digital.")
     epoch = st.session_state.get("patient_epoch", 0)
     if st.button("Nuevo paciente / limpiar", key="patient_reset"):
         for key in list(st.session_state):
