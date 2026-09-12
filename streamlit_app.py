@@ -678,10 +678,12 @@ tab1, tab5, citas, firmas = st.tabs([
     "✍️ Firmas",
 ])
 
+MOSTRAR_FIRMA_PRESTADOR_INDEPENDIENTE = False
+
 with firmas:
-    st.caption("Seleccione el tipo de firma que necesita.")
     tab6 = st.expander("🖊️ Firmas de pacientes · Wacom", expanded=True)
-    tab2 = st.expander("📄 Firmar PDFs · firma del prestador")
+    if MOSTRAR_FIRMA_PRESTADOR_INDEPENDIENTE:
+        tab2 = st.expander("📄 Firmar PDFs · firma del prestador")
 
 with citas:
     st.caption("Abra el grupo de citas que desea procesar.")
@@ -695,23 +697,24 @@ with tab1:
         st.success(f"Archivos: {a} | Filas: {f}")
         st.download_button("Descargar Excel", out, f"PDF_{now_stamp()}.xlsx", key="dl_pdf")
 
-with tab2:
-    pdfs = st.file_uploader(
-        "Subir PDFs para firmar",
-        type=["pdf"],
-        accept_multiple_files=True,
-        key="pdfs"
-    )
-
-    if st.button("✍️ Firmar PDFs", key="btn_firmar", disabled=not pdfs):
-        z = firmar_pdfs_en_zip(pdfs)
-        st.download_button(
-            "Descargar ZIP Firmado",
-            z,
-            f"FIRMADOS_{now_stamp()}.zip",
-            mime="application/zip",
-            key="dl_zip"
+if MOSTRAR_FIRMA_PRESTADOR_INDEPENDIENTE:
+    with tab2:
+        pdfs = st.file_uploader(
+            "Subir PDFs para firmar",
+            type=["pdf"],
+            accept_multiple_files=True,
+            key="pdfs"
         )
+
+        if st.button("✍️ Firmar PDFs", key="btn_firmar", disabled=not pdfs):
+            z = firmar_pdfs_en_zip(pdfs)
+            st.download_button(
+                "Descargar ZIP Firmado",
+                z,
+                f"FIRMADOS_{now_stamp()}.zip",
+                mime="application/zip",
+                key="dl_zip"
+            )
 
 with tab3:
     f = st.file_uploader("Canceladas", type=["xls", "xlsx"], key="cancel")
