@@ -781,6 +781,6 @@ with tab5:
 
 
 with tab6:
-    # Firmas Wacom: pantalla permanente y datos de paciente con o sin dos puntos.
+    # Firmas Wacom: espera hasta seleccionar el campo y descarga tras aceptar.
     from firmas_paciente import render
     render()

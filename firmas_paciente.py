@@ -30,7 +30,7 @@ def patient_details(original, page_index):
             # Prefer the label in the patient column on the left.
             box = min(matches, key=lambda r: (r.x0, r.y0))
             middle = (box.y0+box.y1)/2
-            row = sorted((w for w in words if abs((w[1]+w[3])/2-middle)<3 and w[0]>=box.x1-1),key=lambda w:w[0])
+            row = sorted((w for w in words if abs((w[1]+w[3])/2-middle)<max(3, min(box.height,w[3]-w[1])*.55) and w[0]>=box.x1-1),key=lambda w:w[0])
             output=[]
             for w in row:
                 if ':' in w[4] or w[4].lower() in ('plan','tarifario','razón','razon','nit','teléfono','telefono','edad','fecha'):
@@ -172,7 +172,11 @@ def render():
         if st.session_state.get('patient_signed_context') != signature_id:
             st.session_state.patient_signed_context = signature_id
             st.session_state.patient_signed_at = datetime.now(ZoneInfo('America/Bogota'))
-        details_key = f'patient_details_v2_{page_index}'
+        # Keep the accepted result even when naming data needs manual completion.
+        output = signed_pdf(original,signature,page_index,box)
+        st.session_state.patient_signed_pdf = output
+        st.success("Firma aceptada y conservada en esta sesión.")
+        details_key = f'patient_details_v3_{page_index}'
         if details_key not in st.session_state:
             st.session_state[details_key] = patient_details(original,page_index)
         patient_name,patient_doc = st.session_state[details_key]
@@ -180,11 +184,7 @@ def render():
             st.info('Complete los datos que no se pudieron leer del PDF para nombrar el archivo.')
             patient_name = st.text_input('Nombre y apellidos',value=patient_name,key='patient_filename_name')
             patient_doc = st.text_input('Documento',value=patient_doc,key='patient_filename_document')
-            if not patient_name.strip() or not patient_doc.strip():
-                return
-        filename = signed_filename(patient_name,patient_doc,st.session_state.patient_signed_at)
-        output = signed_pdf(original,signature,page_index,box)
-        st.success("Firma aceptada. Documento listo para descargar.")
+        filename = signed_filename(patient_name.strip() or Path(name).stem,patient_doc.strip() or 'SIN_DOCUMENTO',st.session_state.patient_signed_at)
         st.download_button("Descargar PDF firmado",output,filename,mime="application/pdf",key="patient_download",on_click="ignore")
         st.caption(filename)
         if st.button("Volver a firmar este documento",key="patient_repeat"):

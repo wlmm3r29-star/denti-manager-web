@@ -20,9 +20,9 @@ function createConnection(){
     sc.fillStyle='white';sc.font='bold 28px Arial';sc.fillText('Denti Manager | Firma del paciente',25,48);
     {
       sc.strokeStyle='#668899';sc.lineWidth=2;sc.strokeRect(25,95,750,285);
-      sc.fillStyle='#555';sc.font='18px Arial';sc.fillText(m.accepted?'Firma recibida. Espere el siguiente documento.':m.context?'Firme dentro del recuadro con el lapiz':'Lista. Seleccione el espacio en el PDF.',35,365);
+      sc.fillStyle='#555';sc.font='18px Arial';sc.fillText(m.accepted?'Firma recibida. Espere el siguiente documento.':m.context?'Firme dentro del recuadro y pulse ACEPTAR':'ESPERE: seleccione el campo de firma en el PDF.',35,365);
       for(const [x,color,label] of [[25,'#526777','REPETIR'],[415,'#08785c','ACEPTAR']]){
-        sc.fillStyle=color;sc.fillRect(x,405,360,55);sc.fillStyle='white';sc.font='bold 24px Arial';sc.fillText(label,x+120,440);
+        sc.fillStyle=m.context && !m.accepted?color:'#b0b6bb';sc.fillRect(x,405,360,55);sc.fillStyle='white';sc.font='bold 24px Arial';sc.fillText(label,x+120,440);
       }
     }
     const rgba=sc.getImageData(0,0,800,480).data,bgr=new Uint8Array(800*480*3);
@@ -92,9 +92,9 @@ function createConnection(){
   window.addEventListener('pagehide',()=>{void close();});return m;
 }
 export default function({parentElement,data,setStateValue}){
-  const slot=Symbol.for('denti.wacom.connection.v3');
+  const slot=Symbol.for('denti.wacom.connection.v4');
   if(!window[slot]){
-    const previous=window[Symbol.for('denti.wacom.connection.v2')];
+    const previous=window[Symbol.for('denti.wacom.connection.v3')] || window[Symbol.for('denti.wacom.connection.v2')];
     const next=createConnection();
     if(previous)next.queue=previous.disconnect();
     window[slot]=next;
