@@ -15,7 +15,7 @@ import streamlit.components.v2 as components
 from signing_flow import new_flow, consume_event, ready_to_save
 
 ROOT = Path(__file__).parent
-UI_REVISION = "dual-role-v8"
+UI_REVISION = "compact-role-v9"
 
 
 def patient_details(original, page_index):
@@ -26,7 +26,7 @@ def patient_details(original, page_index):
         def value(label):
             matches = [fitz.Rect(w[:4]) for w in words if w[4].rstrip(':').casefold() == label.casefold()]
             if not matches:
-                matches = page.search_for(label + ":")
+                matches = page.search_for(label + ":") or (page.search_for(label) if ' ' in label else [])
             if not matches:
                 return ""
             # Prefer the label in the patient column on the left.
@@ -39,7 +39,9 @@ def patient_details(original, page_index):
                     break
                 output.append(w[4])
             return " ".join(output).strip()
-        name, surnames, document = value('Nombre'), value('Apellidos'), value('Documento')
+        name = value('Nombre del paciente') or value('Nombre paciente') or value('Nombre')
+        surnames = value('Apellidos')
+        document = value('No. Documento') or value('Documento')
         # Preserve leading zeros. Reject extra columns or non-document text.
         if not re.fullmatch(r'(?:(?:CC|TI|CE|RC|PA|PEP|PPT)\s*)?[A-Z0-9.-]{4,25}',document,re.I):
             document = ""
@@ -63,15 +65,16 @@ capture = components.component(
     <button id="clear">Repetir firma</button><button id="accept">Aceptar firma</button>
     <button id="disconnect">Desconectar pad de firma</button>
     <p id="status" role="status" aria-live="polite">Conecte la tablet para comenzar.</p></div>''',
-    css='''button {padding: .6rem; margin: .2rem; border-radius: 8px; cursor: pointer;}
+    css='''div {display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;}
+    button {font:500 14px var(--st-font, sans-serif);padding:.55rem .65rem;border-radius:8px;cursor:pointer;}
     canvas {width:100%; background:white; border:1px solid #aaa; border-radius:8px;}
-    p {font-family:var(--st-font); color:var(--st-text-color);}''',
+    p {flex-basis:100%;margin:.35rem 0;font:14px var(--st-font,sans-serif);color:var(--st-text-color);}''',
     js=(ROOT / "wacom_capture.js").read_text(encoding="utf-8"),
 )
 save_dialog = components.component(
     "signature_save_as_v8",
     html='<button id="save">Descargar PDF firmado</button><p id="save_status" role="status"></p>',
-    css='button {padding:.7rem;border-radius:8px;cursor:pointer;} p {font-family:var(--st-font);color:var(--st-text-color);}',
+    css='button {font:500 15px var(--st-font,sans-serif);padding:.65rem 1rem;border-radius:8px;cursor:pointer;} p {font:14px var(--st-font,sans-serif);color:var(--st-text-color);}',
     js=(ROOT / "save_signed_pdf.js").read_text(encoding="utf-8"),
 )
 
@@ -179,8 +182,6 @@ def set_role(role):
 
 
 def prepare_document():
-    st.subheader('Clínica DentiCenter | Firmas')
-    st.button('Nuevo paciente / limpiar', key='patient_reset', on_click=reset_document)
     epoch = st.session_state.get('patient_epoch', 0)
     uploaded = st.file_uploader('PDF del paciente', type=['pdf'], key=f'patient_upload_{epoch}')
     if not uploaded:
@@ -212,6 +213,10 @@ def prepare_document():
 
 
 def render():
+    title, reset = st.columns([3, 2], vertical_alignment='center')
+    title.markdown('**Clínica DentiCenter | Firmas**')
+    reset.button('Nuevo paciente / limpiar', key='patient_reset', on_click=reset_document)
+    controls = st.container()
     if 'patient_flow' not in st.session_state and st.session_state.get('patient_signed_pdf'):
         st.info('Hay un PDF firmado en la sesión anterior. Guárdelo antes de comenzar con el nuevo flujo de firmas.')
         capture(key='wacom_connection_v8', data={'context':None,'role':'paciente'},
@@ -222,9 +227,10 @@ def render():
         return
     document = prepare_document()
     if not document:
-        st.subheader('Control de Tablet')
-        capture(key='wacom_connection_v8', data={'context': None, 'role': 'paciente'},
-                default={'event': None}, on_event_change=lambda: None)
+        with controls:
+            st.markdown('**Control de Tablet**')
+            capture(key='wacom_connection_v8', data={'context': None, 'role': 'paciente'},
+                    default={'event': None}, on_event_change=lambda: None)
         return
     original, source_name, page_count = document
     flow = st.session_state.patient_flow
@@ -237,32 +243,15 @@ def render():
     accepted = flow['accepted']
     current = accepted.get(role)
     pending = flow['phase'].endswith('_CAPTURADA')
-    st.subheader('Datos del paciente')
-    st.info('Estos datos serán utilizados únicamente para nombrar el archivo PDF al momento de guardarlo. Ejemplo: juan_perez_111111.pdf')
     detected_name, detected_doc = st.session_state.patient_detected
-    patient_name = st.text_input('Nombre y apellidos', value=detected_name, key='patient_filename_name')
-    patient_doc = st.text_input('No. Documento', value=detected_doc, key='patient_filename_document')
-    if not detected_name or not detected_doc:
-        st.caption('Complete los datos que no se pudieron leer automáticamente del PDF.')
-    st.subheader('Firma del paciente' if role == 'paciente' else 'Firma del prestador')
-    a, b = st.columns(2)
-    a.button('Firma del paciente', on_click=set_role, args=('paciente',),
-             disabled=role == 'paciente' or pending, key='patient_choose_patient')
-    b.button('Firmar prestador', on_click=set_role, args=('prestador',),
-             disabled='paciente' not in accepted or pending or role == 'prestador' or 'coomeva' in accepted,
-             key='patient_choose_provider', help='Captura una nueva firma con el pad en un campo diferente.')
-    if role == 'prestador' and not current and not pending:
-        st.button('Omitir firma prestador', on_click=set_role, args=('paciente',), key='patient_skip_provider')
-    st.write(f'Clínica DentiCenter | Firma del {role}')
+    patient_name, patient_doc = detected_name, detected_doc
     if current:
-        st.success(f'Firma del {role} aceptada. Puede continuar o seleccionar “Repetir firma” para capturarla nuevamente.')
-    elif flow['generation']:
-        st.info(f'Repitiendo firma del {role}' if flow.get('repeat_role') == role else f'Esperando firma del {role}')
+        st.caption(f'Firma del {role} aceptada. Para cambiarla, pulse Repetir firma.')
     else:
-        st.info(f'Seleccione el campo de firma del {role} en el PDF. El pad permanecerá en blanco hasta seleccionarlo.')
+        st.caption(f'Firma del {role}: marque un espacio vacío en el PDF y firme en el pad.')
 
     page_key = f'patient_page_{role}'
-    page_index = st.number_input('Página que va a firmar', 1, page_count,
+    page_index = st.number_input('Página', 1, page_count,
         current['page']+1 if current else page_count, key=page_key, disabled=bool(current) or pending)-1
     preview = compose_pdf(original, accepted)
     with fitz.open(stream=preview, filetype='pdf') as doc:
@@ -290,26 +279,35 @@ def render():
     flow['target'] = target
     if target and not current and not pending:
         flow['phase'] = 'ESPERANDO_FIRMA_' + role.upper()
-    st.subheader('Control de Tablet')
-    capture(key='wacom_connection_v8', data={'context':target['context'] if target else None,
-            'role':role, 'completed':bool(current)}, default={'event':event}, on_event_change=lambda: None)
-    st.caption('El pad mantiene la conexión mientras esta página permanezca abierta. Tras aceptar, la pantalla queda en blanco.')
+    with controls:
+        st.markdown('**Control de Tablet**')
+        capture(key='wacom_connection_v8', data={'context':target['context'] if target else None,
+                'role':role, 'completed':bool(current)}, default={'event':event}, on_event_change=lambda: None)
 
-    if 'paciente' in accepted:
-        st.subheader('Firma Coomeva')
-        st.caption('Añade el sello guardado de la clínica al campo “Firma Prestador” del formato Coomeva.')
-        if st.button('Firma Coomeva', key='patient_coomeva',
-                     disabled=pending or role not in accepted or 'prestador' in accepted or 'coomeva' in accepted):
-            try:
-                box = coomeva_box(original, page_index)
-                validate_target(original, page_index, box, accepted, 'coomeva')
-                accepted['coomeva'] = dict(page=page_index,box=box,png=(ROOT/'firma.png').read_bytes())
-                st.rerun()
-            except Exception as exc:
-                st.warning(str(exc))
-        if 'coomeva' in accepted:
-            st.success('Firma Coomeva añadida. La firma del paciente se conserva.')
-    st.subheader('Documento final')
+    if not detected_name or not detected_doc:
+        st.caption('Complete los datos para nombrar el PDF.')
+        name_col, doc_col = st.columns([3, 2])
+        patient_name = name_col.text_input('Nombre y apellidos', value=detected_name, key='patient_filename_name')
+        patient_doc = doc_col.text_input('No. Documento', value=detected_doc, key='patient_filename_document')
+    coomeva, provider, patient = st.columns(3)
+    if coomeva.button('Firma Coomeva', key='patient_coomeva', use_container_width=True,
+                     disabled='paciente' not in accepted or pending or role not in accepted or 'prestador' in accepted or 'coomeva' in accepted,
+                     help='Añade el sello guardado después de aceptar la firma del paciente.'):
+        try:
+            box = coomeva_box(original, page_index)
+            validate_target(original, page_index, box, accepted, 'coomeva')
+            accepted['coomeva'] = dict(page=page_index,box=box,png=(ROOT/'firma.png').read_bytes())
+            st.rerun()
+        except Exception as exc:
+            st.warning(str(exc))
+    provider.button('Firma prestador', on_click=set_role, args=('prestador',), use_container_width=True,
+             disabled='paciente' not in accepted or pending or role == 'prestador' or 'coomeva' in accepted,
+             key='patient_choose_provider', help='Captura la firma del prestador en otro campo.')
+    patient.button('Firma paciente', on_click=set_role, args=('paciente',), use_container_width=True,
+             disabled=role == 'paciente' or pending, key='patient_choose_patient',
+             help='Vuelve al modo paciente. Conserva las firmas aceptadas.')
+    if 'coomeva' in accepted:
+        st.caption('Sello Coomeva añadido.')
     ready = ready_to_save(flow)
     if ready and patient_name.strip() and patient_doc.strip():
         output = compose_pdf(original, accepted)
@@ -322,5 +320,5 @@ def render():
     else:
         flow['document_state'] = flow['phase']
         st.button('Descargar PDF firmado', disabled=True, key='patient_save_disabled')
-        st.caption('Complete Nombre y apellidos y No. Documento, y acepte las firmas antes de guardar.')
+        st.caption('Acepte la firma y complete los datos para guardar.')
 
