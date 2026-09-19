@@ -668,8 +668,8 @@ def transformar_certificados_coomeva(uploaded_files):
 # ===========================
 # UI STREAMLIT
 # ===========================
-st.set_page_config("Denti Manager Web", layout="centered")
-st.title("Denti Manager")
+st.set_page_config("Clínica DentiCenter", layout="centered")
+st.title("Clínica DentiCenter")
 
 tab1, tab5, citas, firmas = st.tabs([
     "📄 PDF → Excel",
@@ -681,7 +681,7 @@ tab1, tab5, citas, firmas = st.tabs([
 MOSTRAR_FIRMA_PRESTADOR_INDEPENDIENTE = False
 
 with firmas:
-    tab6 = st.expander("🖊️ Firmas de pacientes · Wacom", expanded=True)
+    tab6 = st.expander("🖊️ Firmas de pacientes y prestadores", expanded=True)
     if MOSTRAR_FIRMA_PRESTADOR_INDEPENDIENTE:
         tab2 = st.expander("📄 Firmar PDFs · firma del prestador")
 
@@ -794,7 +794,7 @@ with tab5:
 with tab6:
     # Refresh imported UI on deployment without restarting patient sessions.
     import firmas_paciente as firmas_ui
-    if getattr(firmas_ui, "UI_REVISION", None) != "blank-native-v7":
+    if getattr(firmas_ui, "UI_REVISION", None) != "dual-role-v8":
         import importlib
         firmas_ui = importlib.reload(firmas_ui)
     firmas_ui.render()

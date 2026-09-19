@@ -12,9 +12,10 @@ import fitz
 from PIL import Image
 import streamlit as st
 import streamlit.components.v2 as components
+from signing_flow import new_flow, consume_event, ready_to_save
 
 ROOT = Path(__file__).parent
-UI_REVISION = "blank-native-v7"
+UI_REVISION = "dual-role-v8"
 
 
 def patient_details(original, page_index):
@@ -57,15 +58,21 @@ select_area = components.component(
     js=(ROOT / "pdf_signature_area.js").read_text(encoding="utf-8"),
 )
 capture = components.component(
-    "wacom_stu540_blank_v7",
-    html='''<div><button id="connect">Conectar Wacom STU-540</button>
-    <button id="clear">Repetir</button><button id="accept">Aceptar firma</button>
-    <button id="disconnect">Desconectar</button>
+    "wacom_dual_role_v8",
+    html='''<div><button id="connect">Conectar pad de firma</button>
+    <button id="clear">Repetir firma</button><button id="accept">Aceptar firma</button>
+    <button id="disconnect">Desconectar pad de firma</button>
     <p id="status" role="status" aria-live="polite">Conecte la tablet para comenzar.</p></div>''',
     css='''button {padding: .6rem; margin: .2rem; border-radius: 8px; cursor: pointer;}
     canvas {width:100%; background:white; border:1px solid #aaa; border-radius:8px;}
     p {font-family:var(--st-font); color:var(--st-text-color);}''',
     js=(ROOT / "wacom_capture.js").read_text(encoding="utf-8"),
+)
+save_dialog = components.component(
+    "signature_save_as_v8",
+    html='<button id="save">Descargar PDF firmado</button><p id="save_status" role="status"></p>',
+    css='button {padding:.7rem;border-radius:8px;cursor:pointer;} p {font-family:var(--st-font);color:var(--st-text-color);}',
+    js=(ROOT / "save_signed_pdf.js").read_text(encoding="utf-8"),
 )
 
 
@@ -94,140 +101,226 @@ def signed_pdf(original, signature, page_number, rect):
         box = fitz.Rect(rect)
         if box.is_empty or box.is_infinite or not page.rect.contains(box):
             raise ValueError("La firma debe quedar dentro de la página.")
-        # UI coordinates follow the displayed, rotated page. Normalize this page
-        # without altering its appearance before placing the image.
-        if page.rotation:
-            page.remove_rotation()
-        page.insert_image(box, stream=signature, keep_proportion=True, overlay=True)
-        return doc.tobytes(garbage=3, deflate=True)
+        assert_unsigned_digital(doc)
+        # Keep page rotation, existing content streams, images, forms and annotations.
+        page.insert_image(box * page.derotation_matrix, stream=signature,
+                          rotate=page.rotation, keep_proportion=True, overlay=True)
+        return doc.tobytes(deflate=True)
+
+
+def assert_unsigned_digital(doc):
+    for xref in range(1, doc.xref_length()):
+        if doc.xref_get_key(xref, 'ByteRange')[0] != 'null':
+            raise ValueError('Este PDF contiene una firma digital certificada. No se modifica para evitar invalidarla. Use una copia sin certificación para añadir firmas manuscritas.')
+
+
+def coomeva_box(original, page_index):
+    with fitz.open(stream=original, filetype='pdf') as doc:
+        page = doc[page_index]
+        labels = page.search_for('Firma Prestador')
+        if len(labels) != 1:
+            raise ValueError("No se encontró un único campo 'Firma Prestador'. Seleccione la página correcta para Firma Coomeva.")
+        label = labels[0]
+        box = fitz.Rect(label.x0, label.y0 - 55, label.x0 + 140, label.y0 - 2)
+        box = box * page.rotation_matrix
+        if not page.rect.contains(box):
+            raise ValueError('El campo de Firma Coomeva queda fuera de la página.')
+        return tuple(box)
 
 
 def add_provider_signature(original, page_index):
     """Add the saved provider signature only at an unambiguous labeled position."""
-    with fitz.open(stream=original, filetype="pdf") as doc:
+    return signed_pdf(original, (ROOT / 'firma.png').read_bytes(), page_index,
+                      coomeva_box(original, page_index))
+
+
+def validate_target(original, page_index, box, accepted, role):
+    box = fitz.Rect(box)
+    with fitz.open(stream=original, filetype='pdf') as doc:
         page = doc[page_index]
-        if page.rotation:
-            page.remove_rotation()
-        labels = page.search_for("Firma Prestador")
-        if len(labels) != 1:
-            raise ValueError("No se encontró un único campo 'Firma Prestador' en esta página. El PDF conserva solo la firma del paciente.")
-        label = labels[0]
-        box = fitz.Rect(label.x0, label.y1 - 55 + 8, label.x0 + 140, label.y1 + 8)
-        if not page.rect.contains(box):
-            raise ValueError("El espacio del prestador queda fuera de la página. El PDF conserva solo la firma del paciente.")
-        page.insert_image(box, stream=(ROOT / "firma.png").read_bytes(), keep_proportion=True, overlay=True)
-        return doc.tobytes(garbage=3, deflate=True)
+        if not page.rect.contains(box) or box.width < 8 or box.height < 3:
+            raise ValueError('Marque un recuadro válido dentro de la página.')
+        for other_role, other in accepted.items():
+            if other_role != role and other['page'] == page_index and box.intersects(fitz.Rect(other['box'])):
+                raise ValueError('Este espacio corresponde a otra firma aceptada. Marque un campo diferente.')
+        # Check the actual rendered area, including scanned and vector signatures.
+        # A occupied rectangle is rejected rather than covering existing ink.
+        inner = box + (1, 1, -1, -1)
+        pix = page.get_pixmap(clip=inner, matrix=fitz.Matrix(1, 1), colorspace=fitz.csGRAY, alpha=False)
+        dark = sum(v < 190 for v in pix.samples)
+        if dark > max(8, pix.width * pix.height * .003):
+            raise ValueError('El recuadro contiene texto, trazos o una firma previa. Seleccione un espacio vacío para conservar el documento.')
+    return tuple(box)
+
+
+def compose_pdf(original, accepted):
+    output = original
+    for role in ('paciente', 'prestador', 'coomeva'):
+        entry = accepted.get(role)
+        if entry:
+            output = signed_pdf(output, entry['png'], entry['page'], entry['box'])
+    return output
+
+
+def reset_document():
+    epoch = st.session_state.get('patient_epoch', 0)
+    for key in list(st.session_state):
+        if key.startswith('patient_'):
+            del st.session_state[key]
+    st.session_state.patient_epoch = epoch + 1
+
+
+def set_role(role):
+    flow = st.session_state.patient_flow
+    flow['role'] = role
+    flow['target'] = None
+    flow['phase'] = ('FIRMA_' + role.upper() + '_ACEPTADA' if role in flow['accepted']
+                     else 'ESPERANDO_FIRMA_' + role.upper())
 
 
 def prepare_document():
-    st.subheader("Firmas paciente")
-    st.write("Cargue el PDF, marque el espacio y firme en la tablet. Al aceptar, podrá descargar el documento firmado.")
-    st.caption("Chrome o Edge mantiene la Wacom conectada mientras la página esté abierta. Autorice el USB una vez; las siguientes conexiones son automáticas si Chrome conserva el permiso.")
-    epoch = st.session_state.get("patient_epoch", 0)
-    if st.button("Nuevo paciente / limpiar", key="patient_reset"):
-        for key in list(st.session_state):
-            if key.startswith("patient_"):
-                del st.session_state[key]
-        st.session_state.patient_epoch = epoch + 1
-        st.rerun()
-    uploaded = st.file_uploader("PDF del paciente", type=["pdf"], key=f"patient_upload_{epoch}")
+    st.subheader('Clínica DentiCenter | Firmas')
+    st.button('Nuevo paciente / limpiar', key='patient_reset', on_click=reset_document)
+    epoch = st.session_state.get('patient_epoch', 0)
+    uploaded = st.file_uploader('PDF del paciente', type=['pdf'], key=f'patient_upload_{epoch}')
     if not uploaded:
-        return
+        return None
     original = uploaded.getvalue()
     if len(original) > 25 * 1024 * 1024:
-        st.error("El PDF debe pesar como máximo 25 MB.")
-        return
+        st.error('El PDF debe pesar como máximo 25 MB.')
+        return None
     identity = hashlib.sha256(original).hexdigest()
-    if st.session_state.get("patient_document") != identity:
+    if st.session_state.get('patient_document') != identity or 'patient_flow' not in st.session_state:
         for key in list(st.session_state):
-            if key.startswith("patient_") and not key.startswith("patient_upload") and key != "patient_epoch":
+            if key.startswith('patient_') and not key.startswith('patient_upload') and key != 'patient_epoch':
                 del st.session_state[key]
         st.session_state.patient_document = identity
+        st.session_state.patient_flow = new_flow(identity)
     try:
-        with fitz.open(stream=original, filetype="pdf") as doc:
-            if doc.needs_pass or len(doc) == 0:
-                st.error("Suba un PDF sin contraseña y con al menos una página.")
-                return
-            locked = st.session_state.get('patient_capture_locked', False)
-            page_index = st.number_input("Página que va a firmar", 1, len(doc), len(doc), key="patient_page", disabled=locked) - 1
-            page = doc[page_index]
-            width, height = page.rect.width, page.rect.height
-            st.write("Arrastre sobre el PDF para marcar el espacio donde quiere colocar la firma. Puede dibujar otro recuadro para cambiarlo.")
-            pix = page.get_pixmap(matrix=fitz.Matrix(min(1.5, 1200/width), min(1.5, 1200/width)))
-            area_key = f"patient_area_{epoch}_{identity}_{page_index}"
-            current_area = st.session_state.get(area_key, {}).get("selection")
-            selected = select_area(key=area_key, data={"image":base64.b64encode(pix.tobytes("png")).decode(), "selection":current_area,"locked":locked},
-                                   default={"selection":None}, on_selection_change=lambda: None)
-            if not selected.selection:
-                return
-            coords = selected.selection
-            if not isinstance(coords, list) or len(coords) != 4 or not all(isinstance(v,(int,float)) and 0 <= v <= 1 for v in coords):
-                raise ValueError("Seleccione de nuevo el espacio de firma.")
-            box = fitz.Rect(coords[0]*width,coords[1]*height,coords[2]*width,coords[3]*height)
-            if box.width < 8 or box.height < 3:
-                raise ValueError("Dibuje un recuadro más grande para la firma.")
-        generation = st.session_state.get("patient_capture_generation", 0)
-        context = hashlib.sha256(str((epoch,identity,page_index,tuple(box),generation)).encode()).hexdigest()
-        return original, page_index, box, uploaded.name, context
+        with fitz.open(stream=original, filetype='pdf') as doc:
+            if doc.needs_pass or not len(doc):
+                raise ValueError('Suba un PDF sin contraseña y con al menos una página.')
+            assert_unsigned_digital(doc)
+            if 'patient_detected' not in st.session_state:
+                details = [patient_details(original, i) for i in range(len(doc))]
+                # Keep both values from the same page to avoid mixing identities.
+                st.session_state.patient_detected = max(details, key=lambda v: bool(v[0])+bool(v[1]))
+            return original, uploaded.name, len(doc)
     except Exception as exc:
-        st.error(f"No se pudo preparar la firma: {exc}")
-
-
-def lock_accepted_capture():
-    payload = st.session_state.get('wacom_connection', {}).get('signature')
-    if isinstance(payload, dict) and payload.get('png'):
-        st.session_state.patient_capture_locked = True
+        st.error(f'No se puede preparar este documento: {exc}')
+        return None
 
 
 def render():
-    document = prepare_document()
-    context = document[-1] if document else None
-    previous = st.session_state.get('wacom_connection',{}).get('signature')
-    completed = bool(context and isinstance(previous,dict) and previous.get('context') == context)
-    result = capture(key="wacom_connection", data={"context":context,"completed":completed},
-                     default={"signature":previous}, on_signature_change=lock_accepted_capture)
-    payload = result.signature
-    if not document or not isinstance(payload,dict) or payload.get("context") != context:
+    if 'patient_flow' not in st.session_state and st.session_state.get('patient_signed_pdf'):
+        st.info('Hay un PDF firmado en la sesión anterior. Guárdelo antes de comenzar con el nuevo flujo de firmas.')
+        capture(key='wacom_connection_v8', data={'context':None,'role':'paciente'},
+                default={'event':None}, on_event_change=lambda: None)
+        save_dialog(key='patient_previous_save', data={'pdf':base64.b64encode(st.session_state.patient_signed_pdf).decode(),
+                                                      'filename':'documento_firmado_sesion_anterior.pdf'})
+        st.button('Continuar con un nuevo documento', on_click=reset_document)
         return
+    document = prepare_document()
+    if not document:
+        st.subheader('Control de Tablet')
+        capture(key='wacom_connection_v8', data={'context': None, 'role': 'paciente'},
+                default={'event': None}, on_event_change=lambda: None)
+        return
+    original, source_name, page_count = document
+    flow = st.session_state.patient_flow
+    event = st.session_state.get('wacom_connection_v8', {}).get('event')
     try:
-        original,page_index,box,name,_ = document
-        signature = signature_png(payload.get("png"))
-        signature_id = hashlib.sha256((context+payload.get('png','')+str(payload.get('acceptedAt',''))).encode()).hexdigest()
-        if st.session_state.get('patient_signed_context') != signature_id:
-            st.session_state.patient_signed_context = signature_id
-            st.session_state.patient_signed_at = datetime.now(ZoneInfo('America/Bogota'))
-        # Keep the accepted result even when naming data needs manual completion.
-        output = signed_pdf(original,signature,page_index,box)
-        st.session_state.patient_signed_pdf = output
-        st.success("Firma aceptada y conservada en esta sesión.")
-        details_key = f'patient_details_v4_{page_index}'
-        if details_key not in st.session_state:
-            st.session_state[details_key] = patient_details(original,page_index)
-        patient_name,patient_doc = st.session_state[details_key]
-        if not patient_name or not patient_doc:
-            st.info('Complete los datos que no se pudieron leer del PDF para nombrar el archivo.')
-            patient_name = st.text_input('Nombre y apellidos',value=patient_name,key='patient_filename_name')
-            patient_doc = st.text_input('Documento',value=patient_doc,key='patient_filename_document')
-        filename = signed_filename(patient_name.strip() or Path(name).stem,patient_doc.strip() or 'SIN_DOCUMENTO',st.session_state.patient_signed_at)
-        provider_added = st.session_state.get('patient_provider_signature') == signature_id
-        if st.button("Firmar prestador", key="patient_add_provider", disabled=provider_added,
-                     help="Añade la firma guardada del prestador al campo 'Firma Prestador' de esta página."):
+        consume_event(flow, event, signature_png)
+    except Exception as exc:
+        st.error(f'No se aceptó la captura: {exc}. Seleccione Repetir firma.')
+    role = flow['role']
+    accepted = flow['accepted']
+    current = accepted.get(role)
+    pending = flow['phase'].endswith('_CAPTURADA')
+    st.subheader('Datos del paciente')
+    st.info('Estos datos serán utilizados únicamente para nombrar el archivo PDF al momento de guardarlo. Ejemplo: juan_perez_111111.pdf')
+    detected_name, detected_doc = st.session_state.patient_detected
+    patient_name = st.text_input('Nombre y apellidos', value=detected_name, key='patient_filename_name')
+    patient_doc = st.text_input('No. Documento', value=detected_doc, key='patient_filename_document')
+    if not detected_name or not detected_doc:
+        st.caption('Complete los datos que no se pudieron leer automáticamente del PDF.')
+    st.subheader('Firma del paciente' if role == 'paciente' else 'Firma del prestador')
+    a, b = st.columns(2)
+    a.button('Firma del paciente', on_click=set_role, args=('paciente',),
+             disabled=role == 'paciente' or pending, key='patient_choose_patient')
+    b.button('Firmar prestador', on_click=set_role, args=('prestador',),
+             disabled='paciente' not in accepted or pending or role == 'prestador' or 'coomeva' in accepted,
+             key='patient_choose_provider', help='Captura una nueva firma con el pad en un campo diferente.')
+    if role == 'prestador' and not current and not pending:
+        st.button('Omitir firma prestador', on_click=set_role, args=('paciente',), key='patient_skip_provider')
+    st.write(f'Clínica DentiCenter | Firma del {role}')
+    if current:
+        st.success(f'Firma del {role} aceptada. Puede continuar o seleccionar “Repetir firma” para capturarla nuevamente.')
+    elif flow['generation']:
+        st.info(f'Repitiendo firma del {role}' if flow.get('repeat_role') == role else f'Esperando firma del {role}')
+    else:
+        st.info(f'Seleccione el campo de firma del {role} en el PDF. El pad permanecerá en blanco hasta seleccionarlo.')
+
+    page_key = f'patient_page_{role}'
+    page_index = st.number_input('Página que va a firmar', 1, page_count,
+        current['page']+1 if current else page_count, key=page_key, disabled=bool(current) or pending)-1
+    preview = compose_pdf(original, accepted)
+    with fitz.open(stream=preview, filetype='pdf') as doc:
+        page = doc[page_index]
+        width, height = page.rect.width, page.rect.height
+        pix = page.get_pixmap(matrix=fitz.Matrix(min(1.5,1200/width), min(1.5,1200/width)))
+    area_key = f"patient_area_v8_{flow['identity']}_{role}_{page_index}"
+    area = st.session_state.get(area_key, {}).get('selection')
+    selection = select_area(key=area_key, data={'image':base64.b64encode(pix.tobytes('png')).decode(),
+        'selection':area, 'locked':bool(current) or pending, 'role':role},
+        default={'selection':None}, on_selection_change=lambda: None).selection
+    target = None
+    if current:
+        target = {k:current[k] for k in ('page','box','context')}
+    elif selection:
+        try:
+            if not isinstance(selection,list) or len(selection)!=4 or not all(isinstance(v,(int,float)) and 0<=v<=1 for v in selection):
+                raise ValueError('Marque de nuevo el campo de firma.')
+            box = validate_target(original, page_index, (selection[0]*width,selection[1]*height,
+                selection[2]*width,selection[3]*height), accepted, role)
+            context = hashlib.sha256(str((flow['identity'],role,page_index,box,flow['generation'])).encode()).hexdigest()
+            target = dict(page=page_index, box=box, context=context)
+        except Exception as exc:
+            st.warning(str(exc))
+    flow['target'] = target
+    if target and not current and not pending:
+        flow['phase'] = 'ESPERANDO_FIRMA_' + role.upper()
+    st.subheader('Control de Tablet')
+    capture(key='wacom_connection_v8', data={'context':target['context'] if target else None,
+            'role':role, 'completed':bool(current)}, default={'event':event}, on_event_change=lambda: None)
+    st.caption('El pad mantiene la conexión mientras esta página permanezca abierta. Tras aceptar, la pantalla queda en blanco.')
+
+    if 'paciente' in accepted:
+        st.subheader('Firma Coomeva')
+        st.caption('Añade el sello guardado de la clínica al campo “Firma Prestador” del formato Coomeva.')
+        if st.button('Firma Coomeva', key='patient_coomeva',
+                     disabled=pending or role not in accepted or 'prestador' in accepted or 'coomeva' in accepted):
             try:
-                output = add_provider_signature(output, page_index)
-                st.session_state.patient_provider_signature = signature_id
-                provider_added = True
+                box = coomeva_box(original, page_index)
+                validate_target(original, page_index, box, accepted, 'coomeva')
+                accepted['coomeva'] = dict(page=page_index,box=box,png=(ROOT/'firma.png').read_bytes())
+                st.rerun()
             except Exception as exc:
                 st.warning(str(exc))
-        elif provider_added:
-            output = add_provider_signature(output, page_index)
-        if provider_added:
-            st.success("Firma del prestador añadida. Puede descargar el PDF con ambas firmas.")
+        if 'coomeva' in accepted:
+            st.success('Firma Coomeva añadida. La firma del paciente se conserva.')
+    st.subheader('Documento final')
+    ready = ready_to_save(flow)
+    if ready and patient_name.strip() and patient_doc.strip():
+        output = compose_pdf(original, accepted)
+        timestamp = max(v['signed_at'] for v in accepted.values() if 'signed_at' in v)
+        filename = signed_filename(patient_name, patient_doc, timestamp)
         st.session_state.patient_signed_pdf = output
-        st.download_button("Descargar PDF firmado",output,filename,mime="application/pdf",key="patient_download",on_click="ignore")
+        flow['document_state'] = 'DOCUMENTO_LISTO_PARA_GUARDAR'
+        save_dialog(key='patient_save_as', data={'pdf':base64.b64encode(output).decode(), 'filename':filename})
         st.caption(filename)
-        if st.button("Repetir firma",key="patient_repeat"):
-            st.session_state.patient_capture_locked = False
-            st.session_state.patient_capture_generation = st.session_state.get("patient_capture_generation",0)+1
-            st.rerun()
-    except Exception as exc:
-        st.error(f"No se pudo generar el PDF: {exc}")
+    else:
+        flow['document_state'] = flow['phase']
+        st.button('Descargar PDF firmado', disabled=True, key='patient_save_disabled')
+        st.caption('Complete Nombre y apellidos y No. Documento, y acepte las firmas antes de guardar.')
+
