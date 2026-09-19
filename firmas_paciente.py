@@ -15,7 +15,7 @@ import streamlit.components.v2 as components
 from signing_flow import new_flow, consume_event, ready_to_save
 
 ROOT = Path(__file__).parent
-UI_REVISION = "compact-role-v9"
+UI_REVISION = "mouse-test-v10"
 
 
 def patient_details(original, page_index):
@@ -64,12 +64,12 @@ capture = components.component(
     html='''<div><button id="connect">Conectar pad de firma</button>
     <button id="clear">Repetir firma</button><button id="accept">Aceptar firma</button>
     <button id="disconnect">Desconectar pad de firma</button>
-    <p id="status" role="status" aria-live="polite">Conecte la tablet para comenzar.</p></div>''',
+    <canvas id="mousepad" hidden aria-label="Firma de prueba con mouse" style="touch-action:none;max-height:240px"></canvas><p id="status" role="status" aria-live="polite">Conecte la tablet para comenzar.</p></div>''',
     css='''div {display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;}
     button {font:500 14px var(--st-font, sans-serif);padding:.55rem .65rem;border-radius:8px;cursor:pointer;}
     canvas {width:100%; background:white; border:1px solid #aaa; border-radius:8px;}
     p {flex-basis:100%;margin:.35rem 0;font:14px var(--st-font,sans-serif);color:var(--st-text-color);}''',
-    js=(ROOT / "wacom_capture.js").read_text(encoding="utf-8"),
+    js=(ROOT / "wacom_capture.js").read_text(encoding="utf-8").replace("export default function", "function mountUsb") + "\n" + (ROOT / "mouse_capture.js").read_text(encoding="utf-8"),
 )
 save_dialog = components.component(
     "signature_save_as_v8",
@@ -217,9 +217,13 @@ def render():
     title.markdown('**Clínica DentiCenter | Firmas**')
     reset.button('Nuevo paciente / limpiar', key='patient_reset', on_click=reset_document)
     controls = st.container()
+    with controls:
+        st.markdown('**Control de Tablet**')
+        pad_area = st.container()
+        simulate = st.checkbox('Prueba con mouse', key='signature_test_mode', disabled=bool(st.session_state.get('patient_document')), help='Para cambiar de modo, use Nuevo paciente / limpiar. En prueba se pausa la captura USB.')
     if 'patient_flow' not in st.session_state and st.session_state.get('patient_signed_pdf'):
         st.info('Hay un PDF firmado en la sesión anterior. Guárdelo antes de comenzar con el nuevo flujo de firmas.')
-        capture(key='wacom_connection_v8', data={'context':None,'role':'paciente'},
+        capture(key='wacom_connection_v8', data={'context':None,'role':'paciente','simulate':simulate},
                 default={'event':None}, on_event_change=lambda: None)
         save_dialog(key='patient_previous_save', data={'pdf':base64.b64encode(st.session_state.patient_signed_pdf).decode(),
                                                       'filename':'documento_firmado_sesion_anterior.pdf'})
@@ -227,9 +231,8 @@ def render():
         return
     document = prepare_document()
     if not document:
-        with controls:
-            st.markdown('**Control de Tablet**')
-            capture(key='wacom_connection_v8', data={'context': None, 'role': 'paciente'},
+        with pad_area:
+            capture(key='wacom_connection_v8', data={'context': None, 'role': 'paciente','simulate':simulate},
                     default={'event': None}, on_event_change=lambda: None)
         return
     original, source_name, page_count = document
@@ -272,17 +275,16 @@ def render():
                 raise ValueError('Marque de nuevo el campo de firma.')
             box = validate_target(original, page_index, (selection[0]*width,selection[1]*height,
                 selection[2]*width,selection[3]*height), accepted, role)
-            context = hashlib.sha256(str((flow['identity'],role,page_index,box,flow['generation'])).encode()).hexdigest()
+            context = hashlib.sha256(str((flow['identity'],role,page_index,box,flow['generation'],simulate)).encode()).hexdigest()
             target = dict(page=page_index, box=box, context=context)
         except Exception as exc:
             st.warning(str(exc))
     flow['target'] = target
     if target and not current and not pending:
         flow['phase'] = 'ESPERANDO_FIRMA_' + role.upper()
-    with controls:
-        st.markdown('**Control de Tablet**')
+    with pad_area:
         capture(key='wacom_connection_v8', data={'context':target['context'] if target else None,
-                'role':role, 'completed':bool(current)}, default={'event':event}, on_event_change=lambda: None)
+                'role':role, 'completed':bool(current),'simulate':simulate}, default={'event':event}, on_event_change=lambda: None)
 
     if not detected_name or not detected_doc:
         st.caption('Complete los datos para nombrar el PDF.')
@@ -312,7 +314,7 @@ def render():
     if ready and patient_name.strip() and patient_doc.strip():
         output = compose_pdf(original, accepted)
         timestamp = max(v['signed_at'] for v in accepted.values() if 'signed_at' in v)
-        filename = signed_filename(patient_name, patient_doc, timestamp)
+        filename = ('PRUEBA_' if simulate else '') + signed_filename(patient_name, patient_doc, timestamp)
         st.session_state.patient_signed_pdf = output
         flow['document_state'] = 'DOCUMENTO_LISTO_PARA_GUARDAR'
         save_dialog(key='patient_save_as', data={'pdf':base64.b64encode(output).decode(), 'filename':filename})

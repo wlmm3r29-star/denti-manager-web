@@ -794,7 +794,7 @@ with tab5:
 with tab6:
     # Refresh imported UI on deployment without restarting patient sessions.
     import firmas_paciente as firmas_ui
-    if getattr(firmas_ui, "UI_REVISION", None) != "compact-role-v9":
+    if getattr(firmas_ui, "UI_REVISION", None) != "mouse-test-v10":
         import importlib
         firmas_ui = importlib.reload(firmas_ui)
     firmas_ui.render()

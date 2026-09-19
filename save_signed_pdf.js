@@ -2,7 +2,8 @@ export default function({parentElement,data}) {
   const button=parentElement.querySelector('#save'), status=parentElement.querySelector('#save_status');
   let active=true, saving=false;
   function pending(){
-    const pad=window[Symbol.for('denti.wacom.connection.v8')];
+    const mouse=window[Symbol.for('denti.mouse.connection.v1')];
+    const pad=mouse?.active?mouse:window[Symbol.for('denti.wacom.connection.v8')];
     return pad && (pad.repeatRequested || (pad.desired && !pad.accepted));
   }
   function update(){button.disabled=saving || !data.pdf || pending();}
