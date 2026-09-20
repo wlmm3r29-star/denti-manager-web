@@ -15,7 +15,7 @@ import streamlit.components.v2 as components
 from signing_flow import new_flow, consume_event, ready_to_save
 
 ROOT = Path(__file__).parent
-UI_REVISION = "mouse-test-v10"
+UI_REVISION = "filename-preview-v11"
 
 
 def patient_details(original, page_index):
@@ -291,6 +291,11 @@ def render():
         name_col, doc_col = st.columns([3, 2])
         patient_name = name_col.text_input('Nombre y apellidos', value=detected_name, key='patient_filename_name')
         patient_doc = doc_col.text_input('No. Documento', value=detected_doc, key='patient_filename_document')
+        preview_time = max((v['signed_at'] for v in accepted.values() if 'signed_at' in v),
+                           default=datetime.now(ZoneInfo('America/Bogota')))
+        preview_filename = ('PRUEBA_' if simulate else '') + signed_filename(
+            patient_name.strip() or 'JUAN PEREZ', patient_doc.strip() or '123456789', preview_time)
+        st.caption(f'Ejemplo de archivo: {preview_filename}')
     coomeva, provider, patient = st.columns(3)
     if coomeva.button('Firma Coomeva', key='patient_coomeva', use_container_width=True,
                      disabled='paciente' not in accepted or pending or role not in accepted or 'prestador' in accepted or 'coomeva' in accepted,
