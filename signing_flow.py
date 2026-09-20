@@ -6,7 +6,7 @@ ROLES = ('paciente', 'prestador')
 
 
 def new_flow(identity):
-    return dict(identity=identity, role='paciente', generation=0, accepted={},
+    return dict(identity=identity, role=None, generation=0, accepted={},
                 target=None, last_event=None, phase='DOCUMENTO_CARGADO')
 
 
@@ -22,7 +22,7 @@ def repeat_stage(flow):
 def consume_event(flow, event, validate_png):
     """Accept only an event bound to the current document, role and rectangle."""
     target = flow.get('target')
-    if not isinstance(event, dict) or not target:
+    if flow['role'] not in ROLES or not isinstance(event, dict) or not target:
         return
     if event.get('context') != target['context'] or event.get('role') != flow['role']:
         return
@@ -49,6 +49,6 @@ def consume_event(flow, event, validate_png):
 
 
 def ready_to_save(flow):
-    return bool(flow['accepted'].get('paciente') and
+    return bool(flow['accepted'] and
                 flow['role'] in flow['accepted'] and
                 not flow['phase'].endswith('_CAPTURADA'))

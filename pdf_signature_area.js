@@ -12,7 +12,7 @@ export default function({parentElement,data,setStateValue}) {
       ctx.fillRect(x*canvas.width,y*canvas.height,(x2-x)*canvas.width,(y2-y)*canvas.height);
       ctx.strokeRect(x*canvas.width,y*canvas.height,(x2-x)*canvas.width,(y2-y)*canvas.height);
     }
-    label.textContent=data.locked?'Campo bloqueado durante la captura o tras aceptar. Use Control de Tablet para aceptar o repetir.':rect?'Espacio de firma seleccionado. Puede marcar otro recuadro para cambiarlo.':'Marque el espacio de la firma arrastrando sobre el documento.';
+    label.textContent=data.instruction || (data.locked?'Campo bloqueado durante la captura o tras aceptar. Use Control de Tablet para aceptar o repetir.':rect?'Espacio de firma seleccionado. Puede marcar otro recuadro para cambiarlo.':'Marque el espacio de la firma arrastrando sobre el documento.');
   }
   image.onload=()=>{if(!active)return;canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;ready=true;draw();};
   image.src='data:image/png;base64,'+data.image;

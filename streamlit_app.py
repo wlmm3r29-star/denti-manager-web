@@ -794,7 +794,9 @@ with tab5:
 with tab6:
     # Refresh imported UI on deployment without restarting patient sessions.
     import firmas_paciente as firmas_ui
-    if getattr(firmas_ui, "UI_REVISION", None) != "filename-preview-v11":
+    if getattr(firmas_ui, "UI_REVISION", None) != "choose-signer-v12":
         import importlib
+        import signing_flow
+        importlib.reload(signing_flow)
         firmas_ui = importlib.reload(firmas_ui)
     firmas_ui.render()

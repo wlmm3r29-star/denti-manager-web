@@ -15,7 +15,7 @@ import streamlit.components.v2 as components
 from signing_flow import new_flow, consume_event, ready_to_save
 
 ROOT = Path(__file__).parent
-UI_REVISION = "filename-preview-v11"
+UI_REVISION = "choose-signer-v12"
 
 
 def patient_details(original, page_index):
@@ -176,6 +176,8 @@ def reset_document():
 def set_role(role):
     flow = st.session_state.patient_flow
     flow['role'] = role
+    flow['choice_epoch'] = flow.get('choice_epoch', 0) + 1
+    flow['generation'] += 1
     flow['target'] = None
     flow['phase'] = ('FIRMA_' + role.upper() + '_ACEPTADA' if role in flow['accepted']
                      else 'ESPERANDO_FIRMA_' + role.upper())
@@ -183,7 +185,7 @@ def set_role(role):
 
 def prepare_document():
     epoch = st.session_state.get('patient_epoch', 0)
-    uploaded = st.file_uploader('PDF del paciente', type=['pdf'], key=f'patient_upload_{epoch}')
+    uploaded = st.file_uploader('Documento PDF', type=['pdf'], key=f'patient_upload_{epoch}')
     if not uploaded:
         return None
     original = uploaded.getvalue()
@@ -248,10 +250,27 @@ def render():
     pending = flow['phase'].endswith('_CAPTURADA')
     detected_name, detected_doc = st.session_state.patient_detected
     patient_name, patient_doc = detected_name, detected_doc
-    if current:
-        st.caption(f'Firma del {role} aceptada. Para cambiarla, pulse Repetir firma.')
+    st.markdown('**¿Quién va a firmar?**')
+    patient, provider, coomeva = st.columns(3)
+    patient.button('Firma paciente', on_click=set_role, args=('paciente',), use_container_width=True,
+                   disabled=pending or role == 'paciente', key='patient_choose_patient',
+                   type='primary' if role == 'paciente' else 'secondary')
+    provider.button('Firma prestador', on_click=set_role, args=('prestador',), use_container_width=True,
+                    disabled=pending or role == 'prestador' or 'coomeva' in accepted,
+                    key='patient_choose_provider', type='primary' if role == 'prestador' else 'secondary')
+    coomeva.button('Aplicar sello Coomeva', on_click=set_role, args=('coomeva',), use_container_width=True,
+                   disabled=pending or role == 'coomeva' or 'prestador' in accepted,
+                   key='patient_coomeva', type='primary' if role == 'coomeva' else 'secondary')
+    if not role:
+        instruction = 'Elija quién firma antes de marcar un espacio en el PDF.'
+    elif current:
+        instruction = ('Sello Coomeva aplicado. Puede elegir otra firma o descargar el PDF.' if role == 'coomeva'
+                       else f'Firma del {role} aceptada. Puede elegir otra firma o descargar el PDF. Para cambiarla, pulse Repetir firma.')
+    elif role == 'coomeva':
+        instruction = 'Seleccione dónde colocar el sello Coomeva en el PDF.'
     else:
-        st.caption(f'Firma del {role}: marque un espacio vacío en el PDF y firme en el pad.')
+        instruction = f'Seleccione dónde firmará el {role}. Después, firme y acepte en la tablet.'
+    st.caption(instruction)
 
     page_key = f'patient_page_{role}'
     page_index = st.number_input('Página', 1, page_count,
@@ -261,20 +280,26 @@ def render():
         page = doc[page_index]
         width, height = page.rect.width, page.rect.height
         pix = page.get_pixmap(matrix=fitz.Matrix(min(1.5,1200/width), min(1.5,1200/width)))
-    area_key = f"patient_area_v8_{flow['identity']}_{role}_{page_index}"
+    area_key = f"patient_area_v8_{flow['identity']}_{role}_{page_index}_{flow.get('choice_epoch', 0)}"
     area = st.session_state.get(area_key, {}).get('selection')
     selection = select_area(key=area_key, data={'image':base64.b64encode(pix.tobytes('png')).decode(),
-        'selection':area, 'locked':bool(current) or pending, 'role':role},
+        'selection':area, 'locked':not role or bool(current) or pending, 'role':role, 'instruction':instruction},
         default={'selection':None}, on_selection_change=lambda: None).selection
     target = None
-    if current:
+    if current and role != 'coomeva':
         target = {k:current[k] for k in ('page','box','context')}
-    elif selection:
+    elif role and not current and selection:
         try:
             if not isinstance(selection,list) or len(selection)!=4 or not all(isinstance(v,(int,float)) and 0<=v<=1 for v in selection):
                 raise ValueError('Marque de nuevo el campo de firma.')
             box = validate_target(original, page_index, (selection[0]*width,selection[1]*height,
                 selection[2]*width,selection[3]*height), accepted, role)
+            if role == 'coomeva':
+                accepted['coomeva'] = dict(page=page_index, box=box, png=(ROOT/'firma.png').read_bytes(),
+                                          signed_at=datetime.now(ZoneInfo('America/Bogota')))
+                flow['phase'] = 'FIRMA_COOMEVA_ACEPTADA'
+                flow['target'] = None
+                st.rerun()
             context = hashlib.sha256(str((flow['identity'],role,page_index,box,flow['generation'],simulate)).encode()).hexdigest()
             target = dict(page=page_index, box=box, context=context)
         except Exception as exc:
@@ -284,10 +309,11 @@ def render():
         flow['phase'] = 'ESPERANDO_FIRMA_' + role.upper()
     with pad_area:
         capture(key='wacom_connection_v8', data={'context':target['context'] if target else None,
-                'role':role, 'completed':bool(current),'simulate':simulate}, default={'event':event}, on_event_change=lambda: None)
+                'role':role or 'paciente', 'completed':bool(current),'simulate':simulate}, default={'event':event}, on_event_change=lambda: None)
 
     if not detected_name or not detected_doc:
-        st.caption('Complete los datos para nombrar el PDF.')
+        st.caption('Complete los datos para nombrar el PDF.' if 'paciente' in accepted or role == 'paciente'
+                   else 'Datos opcionales. Si firma solo el prestador, puede conservar el nombre del archivo.')
         name_col, doc_col = st.columns([3, 2])
         patient_name = name_col.text_input('Nombre y apellidos', value=detected_name, key='patient_filename_name')
         patient_doc = doc_col.text_input('No. Documento', value=detected_doc, key='patient_filename_document')
@@ -295,31 +321,17 @@ def render():
                            default=datetime.now(ZoneInfo('America/Bogota')))
         preview_filename = ('PRUEBA_' if simulate else '') + signed_filename(
             patient_name.strip() or 'JUAN PEREZ', patient_doc.strip() or '123456789', preview_time)
+        if role != 'paciente' and 'paciente' not in accepted and not (patient_name.strip() and patient_doc.strip()):
+            preview_filename = ('PRUEBA_' if simulate else '') + signed_filename(Path(source_name).stem, 'FIRMADO', preview_time)
         st.caption(f'Ejemplo de archivo: {preview_filename}')
-    coomeva, provider, patient = st.columns(3)
-    if coomeva.button('Firma Coomeva', key='patient_coomeva', use_container_width=True,
-                     disabled='paciente' not in accepted or pending or role not in accepted or 'prestador' in accepted or 'coomeva' in accepted,
-                     help='Añade el sello guardado después de aceptar la firma del paciente.'):
-        try:
-            box = coomeva_box(original, page_index)
-            validate_target(original, page_index, box, accepted, 'coomeva')
-            accepted['coomeva'] = dict(page=page_index,box=box,png=(ROOT/'firma.png').read_bytes())
-            st.rerun()
-        except Exception as exc:
-            st.warning(str(exc))
-    provider.button('Firma prestador', on_click=set_role, args=('prestador',), use_container_width=True,
-             disabled='paciente' not in accepted or pending or role == 'prestador' or 'coomeva' in accepted,
-             key='patient_choose_provider', help='Captura la firma del prestador en otro campo.')
-    patient.button('Firma paciente', on_click=set_role, args=('paciente',), use_container_width=True,
-             disabled=role == 'paciente' or pending, key='patient_choose_patient',
-             help='Vuelve al modo paciente. Conserva las firmas aceptadas.')
-    if 'coomeva' in accepted:
-        st.caption('Sello Coomeva añadido.')
     ready = ready_to_save(flow)
-    if ready and patient_name.strip() and patient_doc.strip():
+    has_details = bool(patient_name.strip() and patient_doc.strip())
+    needs_details = 'paciente' in accepted
+    if ready and (has_details or not needs_details):
         output = compose_pdf(original, accepted)
         timestamp = max(v['signed_at'] for v in accepted.values() if 'signed_at' in v)
-        filename = ('PRUEBA_' if simulate else '') + signed_filename(patient_name, patient_doc, timestamp)
+        filename = ('PRUEBA_' if simulate else '') + (signed_filename(patient_name, patient_doc, timestamp)
+            if has_details else signed_filename(Path(source_name).stem, 'FIRMADO', timestamp))
         st.session_state.patient_signed_pdf = output
         flow['document_state'] = 'DOCUMENTO_LISTO_PARA_GUARDAR'
         save_dialog(key='patient_save_as', data={'pdf':base64.b64encode(output).decode(), 'filename':filename})
@@ -327,5 +339,5 @@ def render():
     else:
         flow['document_state'] = flow['phase']
         st.button('Descargar PDF firmado', disabled=True, key='patient_save_disabled')
-        st.caption('Acepte la firma y complete los datos para guardar.')
+        st.caption('Complete los datos para guardar.' if ready else 'Seleccione una firma y acéptela para guardar.')
 
